@@ -1,0 +1,30 @@
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# NestJS build output
+dist/
+/out-tsc
+
+# Entornos y variables secretas
+.env
+.env.test
+.env.production
+
+# Prisma
+# (Ignoramos SQLite local si lo hubiera, pero NO ignoramos schema.prisma)
+*.db
+*.db-journal
+
+# Archivos generados temporalmente (como tus facturas locales de prueba)
+/facturas_locales/*.pdf
+
+# SO y Editores
+.DS_Store
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln

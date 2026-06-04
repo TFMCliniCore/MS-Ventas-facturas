@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: 'Courier New', Courier, monospace; font-size: 12px; margin: 0; padding: 20px; max-width: 300px; }
+        .center { text-align: center; }
+        .bold { font-weight: bold; }
+        .divider { border-top: 1px dashed #000; margin: 10px 0; }
+        .flex { display: flex; justify-content: space-between; }
+        .item-row { margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <div class="center">
+        <h2 style="margin:0;">CLINICORE</h2>
+        <p style="margin:5px 0;">Sistema Veterinario Integrado</p>
+        <p style="margin:0;">RUC: 1234567890</p>
+    </div>
+
+    <div class="divider"></div>
+    <p><strong>Factura:</strong> {{numeroFactura}}</p>
+    <p><strong>Fecha:</strong> {{fecha}}</p>
+    <p><strong>Cliente:</strong> {{cliente.nombre}}</p>
+    <p><strong>ID:</strong> {{cliente.identificacion}}</p>
+    
+    <div class="divider"></div>
+    <div class="flex bold"><span>Item</span><span>Total</span></div>
+    <div class="divider"></div>
+
+    {{#each items}}
+    <div class="item-row">
+        <div>{{this.cantidad}}x {{this.nombre}}</div>
+        <div class="flex"><span>${{this.precioUnitario}}</span><span>${{this.totalItem}}</span></div>
+    </div>
+    {{/each}}
+
+    <div class="divider"></div>
+    <div class="flex"><span>Subtotal:</span><span>${{subtotal}}</span></div>
+    <div class="flex"><span>IVA (16%):</span><span>${{iva}}</span></div>
+    <div class="flex bold" style="font-size: 14px; margin-top:5px;"><span>TOTAL:</span><span>${{total}}</span></div>
+    
+    <div class="divider"></div>
+    <div class="center">
+        <p>¡Gracias por confiar en CliniCore!</p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,142 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Venta {
+  id              Int           @id @default(autoincrement())
+  codigo          String        @unique // Ej: FACT-010626-A9X
+  fecha           DateTime      @default(now())
+  clienteId       Int?          // ID del MS Entidades-Core
+  usuarioId       Int           // ID del cajero
+  sucursalId      Int           // ID de la sucursal (MS Entidades)
+  subtotal        Decimal       @db.Decimal(10, 2)
+  descuento       Decimal       @default(0) @db.Decimal(10, 2)
+  impuestos       Decimal       @db.Decimal(10, 2)
+  total           Decimal       @db.Decimal(10, 2)
+  estado          EstadoVenta   @default(COMPLETADA)
+  motivoAnulacion String?       // Requisito: Justificación si se anula
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  cierreCajaId    Int?
+  cierreCaja      CierreCaja?   @relation(fields: [cierreCajaId], references: [id])
+
+  detalles        DetalleVenta[]
+  pagos           Pago[]
+  factura         Factura?
+}
+
+model DetalleVenta {
+  id              Int        @id @default(autoincrement())
+  ventaId         Int
+  productoId      Int        // Ref a MS Inventario
+  cantidad        Int
+  precioUnitario  Decimal    @db.Decimal(10, 2)
+  subtotal        Decimal    @db.Decimal(10, 2)
+  promocionId     Int?       // Relación opcional con Promocion
+  
+  // Si se borra la Venta (cabecera), se borra su detalle (Esto sí es un Cascade válido)
+  venta           Venta      @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  
+  // PREVENCIÓN: No se puede borrar una promoción si ya está amarrada a un detalle histórico
+  promocion       Promocion? @relation(fields: [promocionId], references: [id], onDelete: Restrict) 
+}
+
+model Pago {
+  id            Int        @id @default(autoincrement())
+  ventaId       Int
+  metodoPagoId  Int
+  monto         Decimal    @db.Decimal(10, 2)
+  referencia    String?    
+  fecha         DateTime   @default(now())
+  
+  venta         Venta      @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  // PREVENCIÓN: No se puede borrar un método de pago (ej. Tarjeta) si ya tiene registros de pago
+  metodoPago    MetodoPago @relation(fields: [metodoPagoId], references: [id], onDelete: Restrict)
+}
+
+model MetodoPago {
+  id                 Int      @id @default(autoincrement())
+  nombre             String   @unique
+  requiereReferencia Boolean  @default(false)
+  activo             Boolean  @default(true)
+  pagos              Pago[]
+}
+
+model Factura {
+  id                Int             @id @default(autoincrement())
+  ventaId           Int             @unique
+  numeroComprobante String          @unique // Numeración fiscal o ticket
+  tipoComprobante   TipoComprobante @default(TICKET) // Nuevo: Diferencia entre ticket y factura
+  urlPdf            String?         // Ruta del archivo generado localmente
+  fechaEmision      DateTime        @default(now())
+  venta             Venta           @relation(fields: [ventaId], references: [id])
+  // rfcCliente y razonSocial eliminados. Se consulta vía clienteId en Venta.
+}
+
+model CierreCaja {
+  id              Int           @id @default(autoincrement())
+  usuarioId       Int           // Cajero en turno
+  sucursalId      Int
+  fechaApertura   DateTime      @default(now())
+  fechaCierre     DateTime?
+  montoInicial    Decimal       @db.Decimal(10, 2)
+  totalCalculado  Decimal?      @db.Decimal(10, 2) // Suma del sistema
+  totalReal       Decimal?      @db.Decimal(10, 2) // Conteo físico (Arqueo)
+  diferencia      Decimal?      @db.Decimal(10, 2)
+  observaciones   String?
+  estado          EstadoCierre  @default(ABIERTA)
+  ventas          Venta[]
+}
+
+model HistorialPrecio {
+  id              Int      @id @default(autoincrement())
+  productoId      Int      // Ref a MS Inventario
+  precioCosto     Decimal  @db.Decimal(10, 2)
+  precioVenta     Decimal  @db.Decimal(10, 2)
+  margen          Decimal  @db.Decimal(5, 2) // Porcentaje (%)
+  fechaCambio     DateTime @default(now())
+  usuarioId       Int      // ID de quien realizó el cambio
+}
+
+model Promocion {
+  id              Int           @id @default(autoincrement())
+  nombre          String
+  descripcion     String?
+  tipoDescuento   TipoDescuento // PORCENTAJE o MONTO_FIJO
+  valorDescuento  Decimal       @db.Decimal(10, 2)
+  fechaInicio     DateTime
+  fechaFin        DateTime
+  categoriaId     Int?          // Ref a MS Inventario (Aplica a toda la categoría)
+  activa          Boolean       @default(true)
+  
+  detallesVenta   DetalleVenta[]
+}
+
+enum EstadoVenta {
+  PENDIENTE
+  COMPLETADA
+  ANULADA
+}
+
+enum EstadoCierre {
+  ABIERTA
+  CERRADA
+  CUADRADA
+}
+
+enum TipoDescuento {
+  PORCENTAJE
+  MONTO_FIJO
+}
+
+// NUEVO ENUM: Define el tipo de documento generado
+enum TipoComprobante {
+  TICKET
+  FACTURA
+}
