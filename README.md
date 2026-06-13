@@ -19,11 +19,12 @@ Para garantizar el orden y la mantenibilidad del código, las responsabilidades 
 ## 🚀 Funcionalidades Implementadas
 
 * **Transacciones Atómicas (POS):** Registro seguro de ventas, detalles y métodos de pago utilizando `prisma.$transaction` para garantizar la integridad referencial (Rollback automático ante fallos de stock).
+* **Validación Estricta de Payload:** Integración de `class-validator` y `class-transformer` global en el `main.ts`. Validación rigurosa de las propiedades raíz en el `CreateVentaDto` (`total`, `montoPagadoCon`, `metodoPagoId`) mapeadas limpiamente desde el Frontend.
 * **Generación de Comprobantes:** Creación automatizada de archivos PDF corporativos para Tickets y Facturas tras el cobro exitoso, guardando la referencia (`urlPdf`) en base de datos.
-* **Control de Turnos (Cierre de Caja):** Bloqueo estricto del registro de ventas si la caja asignada al usuario se encuentra en estado `CERRADO`.
-* **Anulación y Desacoplamiento:** Sistema de anulación de ventas con justificación obligatoria (`motivoAnulacion`). Implementa una llamada asíncrona (`fetch`) al *MS Inventario* para la devolución del stock, evitando la congestión del hilo principal y respetando la arquitectura de microservicios.
-* **Gestión de Precios y Auditoría:** Motor de bloqueo perimetral para evitar la asignación de precios que generen márgenes negativos (salvo excepciones autorizadas mediante flag). Todo cambio genera un registro inmutable en la tabla `HistorialPrecio` con ID de usuario y fecha real del servidor.
-* **Motor de Promociones:** Evaluación de vigencia de descuentos utilizando el reloj interno del servidor (`new Date()`) para evitar manipulaciones desde el cliente. Implementa un algoritmo de **Prioridad de Descuentos** que selecciona el mayor beneficio para el cliente (ej. Categoría vs Volumen) bloqueando la acumulación lineal.
+* **Control de Turnos (Cierre de Caja):** Bloqueo estricto del registro de ventas y validación automatizada de efectivo disponible si la caja asignada al usuario se encuentra en estado `CERRADO` o reporta montos insuficientes para vueltos.
+* **Anulación y Desacoplamiento:** Sistema de anulación de ventas con justificación obligatoria (`motivoAnulacion`). Implementa una llamada asíncrona (`fetch`) al *MS Inventario* para la devolución del stock, evitando la congestión del hilo principal.
+* **Gestión de Precios y Auditoría:** Motor de bloqueo perimetral para evitar la asignación de precios que generen márgenes negativos. Todo cambio genera un registro inmutable en la tabla `HistorialPrecio`.
+* **Motor de Promociones:** Evaluación de vigencia de descuentos utilizando el reloj interno del servidor (`new Date()`) aplicando un algoritmo de **Prioridad de Descuentos** que selecciona el mayor beneficio no acumulable.
 
 ---
 
@@ -45,7 +46,7 @@ POSTGRES_PASSWORD=postgres
 # Cadena de conexión para Prisma (Local / Docker)
 DATABASE_URL="postgresql://postgres:postgres@localhost:5438/ms_ventas?schema=public"
 
-# URLs Microservicios Dependientes (Ajustar puertos según entorno)
+# URLs Microservicios Dependientes
 MS_INVENTARIO_URL="http://localhost:3007/api/v1"
 MS_ENTIDADES_CORE_URL="http://localhost:3001/api/v1"
 🛠️ Instalación y Despliegue
@@ -56,44 +57,29 @@ Instala los módulos de Node necesarios para el framework:
 
 Bash
 npm install
-2. Configurar la Base de Datos y Prisma
-Asegúrate de tener la instancia de PostgreSQL corriendo en el puerto especificado en tu .env (ej. mediante Docker). Luego, sincroniza los modelos ejecutando las migraciones:
+2. Configurar la Base de Datos, Migraciones y Seed
+Asegúrate de tener la instancia de PostgreSQL activa. Luego, sincroniza el historial completo de migraciones (incluyendo el módulo de cierres de caja) y pobla el catálogo de métodos de pago fijos:
 
 Bash
-# Generar el cliente de Prisma basado en el esquema
+# Generar el cliente de Prisma basado en el esquema actualizado
 npx prisma generate
 
-# Aplicar las migraciones a la base de datos de desarrollo
-npx prisma migrate dev --name init
+# Aplicar las migraciones existentes en el historial
+npx prisma migrate dev
+
+# Poblado obligatorio de la base de datos (Catálogo de Métodos de Pago, etc.)
+npx prisma db seed
 3. Levantar el Servidor
 Para iniciar el microservicio en modo desarrollo con recarga automática (hot-reload):
 
 Bash
 npm run start:dev
-El servidor levantará por defecto en el puerto 3008 (según la configuración del archivo .env) bajo el prefijo base http://localhost:3008/api/v1.
+El servidor levantará por defecto en el puerto 3008 bajo el prefijo base http://localhost:3008/api/v1.
 
-⚠️ Notas Técnicas para Producción (Technical Debt)
-Mapeo de Métodos de Pago (ventas.service.ts)
-Durante el desarrollo local y las pruebas de integración, se implementó una estrategia de resiliencia en el guardado de métodos de pago utilizando connectOrCreate de Prisma:
-
-TypeScript
-metodoPago: {
-  connectOrCreate: {
-    where: { id: p.metodoPagoId || 1 },
-    create: { id: p.metodoPagoId || 1, nombre: "Efectivo / POS" }
-  }
-}
-Plan de acción para el paso a Producción:
-Este comportamiento es temporal. En un entorno productivo, el catálogo de métodos de pago (Efectivo, Tarjeta, Transferencia) debe ser estrictamente controlado y no debe crearse "al vuelo" para evitar la duplicación de datos.
-
-Antes del despliegue final, se debe:
-
-Paso A: Ejecutar un script de semilla (prisma/seed.ts) que inserte los métodos de pago fijos y reales en la base de datos.
-
-Paso B: Cambiar el bloque de código a una asignación estricta y delegar la validación temprana a NestJS (retornar 400 Bad Request si el ID del método de pago enviado por el frontend no existe).
+🔒 Arquitectura de Datos y Asignación de Pagos
+El sistema utiliza una asignación e inserción directa y fuertemente tipada de los identificadores de pago enviados por el cliente, delegando la integridad referencial a la base de datos y retornando un 400 Bad Request en caso de inconsistencias:
 
 TypeScript
-// Código objetivo para Producción:
 pagos: {
   create: pagos.map(p => ({
     metodoPagoId: p.metodoPagoId,
