@@ -1,28 +1,26 @@
+/// <reference types="node" />
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('Sembrando métodos de pago para POS...');
-
   const metodos = [
-    { nombre: 'Efectivo', requiereReferencia: false },
-    { nombre: 'Tarjeta', requiereReferencia: true },
-    { nombre: 'Transferencia', requiereReferencia: true },
-    { nombre: 'Mixto', requiereReferencia: false },
+    { id: 1, nombre: 'EFECTIVO' },
+    { id: 2, nombre: 'TARJETA' },
+    { id: 3, nombre: 'MIXTO' },
   ];
 
-  for (const metodo of metodos) {
+  for (const m of metodos) {
     await prisma.metodoPago.upsert({
-      where: { nombre: metodo.nombre },
+      where: { id: m.id },
       update: {},
-      create: metodo,
+      create: m,
     });
   }
-
-  console.log('Semilla ejecutada con éxito.');
+  console.log('Seeding completado con éxito.');
 }
 
+// Llama a main() de forma limpia una sola vez
 main()
   .catch((e) => {
     console.error(e);

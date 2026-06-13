@@ -5,164 +5,183 @@ import { AnularVentaDto } from './dto/update-venta.dto';
 import { IUsuarioCcontext } from '../common/interfaces/user-request.interface';
 import { FacturasService } from '../facturas/facturas.service'; 
 
-
 @Injectable()
 export class VentasService {
   private prisma = new PrismaClient();
   private readonly logger = new Logger(VentasService.name);
-  private readonly inventarioUrl = process.env.MS_INVENTARIO_URL || 'http://localhost:3007/api/v1';
+  private readonly inventarioUrl = process.env.MS_INVENTARIO_URL || 'http://host.docker.internal:3007/api/v1';
 
-  // 👇 AQUÍ AGREGAMOS EL CONSTRUCTOR PARA INYECTAR EL FACTURAS SERVICE 👇
   constructor(
     private readonly facturasService: FacturasService, 
   ) {}
 
-  async create(createVentaDto: CreateVentaDto, usuario: IUsuarioCcontext) {
-    const { detalles, pagos, clienteId, descuento = 0, tipoComprobante } = createVentaDto;
+async create(createVentaDto: CreateVentaDto, usuario: IUsuarioCcontext) {
+    const { 
+      detalles, 
+      pagos, 
+      clienteId, 
+      descuento = 0, 
+      tipoComprobante,
+      total,
+      montoPagadoCon,
+      metodoPagoId 
+    } = createVentaDto;
+    
+    const usuarioIdFinal = usuario.id || 1;
 
-    // 1. Validar Stock previo en el MS Inventario (HTTP-Join) - Síncrono y preventivo
+    // 1. Buscamos de forma proactiva la caja activa
+    const cajaAbiertaActual = await this.prisma.cierreCaja.findFirst({
+      where: { estado: 'ABIERTA' },
+    });
+
+    if (!cajaAbiertaActual) {
+      throw new ForbiddenException(
+        'No puedes registrar ventas. No tienes un turno de caja abierto en este momento.'
+      );
+    }
+
+    // =========================================================================
+    // PASO 1.5: VALIDACIÓN DE FONDOS DISPONIBLES PARA EL VUELTO
+    // =========================================================================
+    // Suponiendo que metodoPagoId === 1 mapea a 'EFECTIVO'
+if (Number(metodoPagoId) === 1) {
+      const vueltoRequerido = Number(montoPagadoCon) - Number(total);
+
+      if (vueltoRequerido > 0) {
+        const efectivoDisponibleEnCaja = Number(cajaAbiertaActual.montoInicial) || 0;
+
+        if (efectivoDisponibleEnCaja < vueltoRequerido) {
+          throw new BadRequestException(
+            `Falta de efectivo en caja chica. Disponible: ${efectivoDisponibleEnCaja}, Requerido: ${vueltoRequerido}`
+          );
+        }
+      }
+    }
+
+    // 2. Validar Stock y Existencia directamente en nuestra tabla local 'Producto'
     for (const item of detalles) {
       try {
-        const res = await fetch(`${this.inventarioUrl}/productos/${item.productoId}`);
-        if (!res.ok) throw new NotFoundException(`Producto con ID ${item.productoId} no existe en inventario.`);
+        const producto = await this.prisma.producto.findUnique({
+          where: { id: item.productoId }
+        });
         
-        const producto = await res.json();
-        if (producto.cantidadActual < item.cantidad) { // <-- Corregido
+        if (!producto) {
+          throw new NotFoundException(`Producto con ID ${item.productoId} no existe en inventario.`);
+        }
+        
+        if (producto.cantidadActual < item.cantidad) {
           throw new BadRequestException(`Stock insuficiente para el producto: ${producto.nombre}. Disponible: ${producto.cantidadActual}`);
         }
       } catch (err: any) {
-        throw new BadRequestException(err.message || 'Error de comunicación con el MS Inventario.');
+        throw new BadRequestException(err.message || 'Error validando el producto localmente.');
       }
     }
 
-      // 2. Calcular Totales matemáticos con redondeo financiero de 2 decimales
-      let calculadoSubtotal = 0;
-      detalles.forEach(item => {
-        calculadoSubtotal += item.cantidad * Number(item.precioUnitario);
-      });
-      calculadoSubtotal = Math.round(calculadoSubtotal * 100) / 100;
+    // 3. Calcular Totales matemáticos con redondeo financiero
+    let calculadoSubtotal = 0;
+    detalles.forEach(item => {
+      calculadoSubtotal += item.cantidad * Number(item.precioUnitario);
+    });
+    calculadoSubtotal = Math.round(calculadoSubtotal * 100) / 100;
 
-      const impuestoPorcentaje = 0.15; // IVA 15%
-      const totalDescuento = Math.round(Number(descuento) * 100) / 100;
-      const subtotalConDescuento = Math.max(0, calculadoSubtotal - totalDescuento);
+    const impuestoPorcentaje = 0.15; // IVA 15%
+    const totalDescuento = Math.round(Number(descuento) * 100) / 100;
+    const subtotalConDescuento = Math.max(0, calculadoSubtotal - totalDescuento);
+    
+    const calculadosImpuestos = Math.round((subtotalConDescuento * impuestoPorcentaje) * 100) / 100;
+    const calculadoTotal = Math.round((subtotalConDescuento + calculadosImpuestos) * 100) / 100;
+
+    // 4. Validar pagos
+    const totalPagado = Math.round(pagos.reduce((acc, p) => acc + Number(p.monto), 0) * 100) / 100;
+
+    if (totalPagado !== calculadoTotal) {
+      throw new BadRequestException(
+        `Discrepancia en los pagos: El monto recibido ($${totalPagado}) no coincide con el total real de la venta ($${calculadoTotal}).`
+      );
+    }
+
+    // 5. Generación de Códigos
+    const ahora = new Date();
+    const dia = String(ahora.getDate()).padStart(2, '0');
+    const mes = String(ahora.getMonth() + 1).padStart(2, '0');
+    const anio = String(ahora.getFullYear()).slice(-2);
+    const fechaFormateada = `${dia}${mes}${anio}`;
+
+    const prefijo = tipoComprobante === TipoComprobante.FACTURA ? 'FACT' : 'TICK';
+    const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase().padStart(4, 'X');
+    const codigoVenta = `${prefijo}-${fechaFormateada}-${randomStr}`;
+
+    // 6. PERSISTENCIA EN BD Y ACTUALIZACIÓN DE STOCK LOCAL MEDIANTE TRANSACCIÓN
+    const nuevaVenta = await this.prisma.$transaction(async (tx) => {
       
-      const calculadosImpuestos = Math.round((subtotalConDescuento * impuestoPorcentaje) * 100) / 100;
-      const calculadoTotal = Math.round((subtotalConDescuento + calculadosImpuestos) * 100) / 100;
-
-      // 3. Validar y blindar que los montos de pago cubran exactamente el total real
-      const totalPagado = Math.round(pagos.reduce((acc, p) => acc + Number(p.monto), 0) * 100) / 100;
-
-      if (totalPagado !== calculadoTotal) {
-        throw new BadRequestException(
-          `Discrepancia en los pagos: El monto recibido ($${totalPagado}) no coincide con el total real de la venta ($${calculadoTotal}). Transacción rechazada.`
-        );
+      // 💡 NUEVO: Descontar el stock localmente en cascada
+      for (const item of detalles) {
+        await tx.producto.update({
+          where: { id: item.productoId },
+          data: { cantidadActual: { decrement: item.cantidad } }
+        });
       }
 
-      // --- PUNTO 1: Algoritmo de Generación de Código Único (Prefijo + Fecha + Sufijo Aleatorio) ---
-      const ahora = new Date();
-      const dia = String(ahora.getDate()).padStart(2, '0');
-      const mes = String(ahora.getMonth() + 1).padStart(2, '0');
-      const anio = String(ahora.getFullYear()).slice(-2);
-      const fechaFormateada = `${dia}${mes}${anio}`; // Ej: 010626
+      return await tx.venta.create({
+        data: {
+          codigo: codigoVenta, 
+          clienteId: clienteId || 1, 
+          sucursalId: 1, 
+          cierreCajaId: cajaAbiertaActual.id,
+          subtotal: calculadoSubtotal,
+          descuento: totalDescuento,
+          impuestos: calculadosImpuestos,
+          total: calculadoTotal,
+          estado: "COMPLETADA",
+          usuarioId: usuarioIdFinal, 
+          detalles: {
+            create: detalles.map(item => ({
+              productoId: item.productoId,
+              cantidad: item.cantidad,
+              precioUnitario: Number(item.precioUnitario),
+              subtotal: Math.round(item.cantidad * Number(item.precioUnitario) * 100) / 100,
+              promocionId: item.promocionId || null
+            }))
+          },
+          pagos: {
+            create: pagos.map(p => {
+              const metodoId = Number(p.metodoPagoId);
+              
+              // 🔥 VALIDACIÓN: Si no viene el ID o no es un número válido, frena la operación
+              if (!metodoId || isNaN(metodoId)) {
+                throw new BadRequestException(
+                  `El campo 'metodoPagoId' es requerido y debe ser un número válido. Recibido: ${p.metodoPagoId}`
+                );
+              }
 
-      const prefijo = tipoComprobante === TipoComprobante.FACTURA ? 'FACT' : 'TICK';
-      const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase().padStart(4, 'X');
-      const codigoVenta = `${prefijo}-${fechaFormateada}-${randomStr}`;
-      const usuarioIdFinal = usuario.id || 1;
-
-      const cajaActiva = await this.prisma.cierreCaja.findFirst({
-  where: { 
-    usuarioId: usuarioIdFinal, // El ID del cajero que viene en el token
-    estado: 'ABIERTA' 
-  }
-});
-
-// 2. Bloqueo Post-Cierre / Consistencia de Turnos
-if (!cajaActiva) {
-  throw new ForbiddenException(
-    'No puedes registrar ventas. No tienes un turno abierto o tu caja ya fue cerrada.'
-  );
-}
-    // 4. Transacción Atómica Local
-      const nuevaVenta = await this.prisma.$transaction(async (tx) => {
-        // Crear Registro de la Venta en conjunto con su Factura/Ticket inicializado
-        return await tx.venta.create({
-          data: {
-            codigo: codigoVenta, 
-            clienteId: clienteId || 1, 
-            sucursalId: 1, // Mantenemos el ID 1 fijo para la simulación local
-
-            cierreCajaId: cajaActiva.id,
-            
-            // 🏷️ COMPORTAMIENTO DINÁMICO DE TOTALES Y DESCUENTOS:
-            subtotal: calculadoSubtotal,
-            descuento: totalDescuento,
-            impuestos: calculadosImpuestos,
-            total: calculadoTotal,
-            estado: "COMPLETADA",
-            usuarioId: usuarioIdFinal, 
-
-            // 📦 MAPEO REAL DE LOS ARTÍCULOS EN LA BASE DE DATOS:
-            detalles: {
-              create: detalles.map(item => ({
-                productoId: item.productoId,
-                cantidad: item.cantidad,
-                precioUnitario: Number(item.precioUnitario),
-                subtotal: Math.round(item.cantidad * Number(item.precioUnitario) * 100) / 100,
-                promocionId: item.promocionId || null // Captura el ID de promoción si viene en el payload
-              }))
-            },
-
-            // 💳 MAPEO REAL DE LAS FORMAS DE PAGO:
-            pagos: {
-              create: pagos.map(p => ({
+              return {
                 monto: Number(p.monto),
                 referencia: p.referencia || null,
-                // En lugar de metodoPagoId: p.metodoPagoId directo, hacemos esto:
                 metodoPago: {
-                  connectOrCreate: {
-                    where: { id: p.metodoPagoId || 1 },
-                    create: { id: p.metodoPagoId || 1, nombre: "Efectivo / POS" } // Crea el método 1 si no existe en BD
-                  }
+                  connect: { id: metodoId } // 👈 Ya no usamos el "|| 1" a ciegas
                 }
-              }))
-            },
-
-            factura: {
-              create: {
-                numeroComprobante: codigoVenta,
-                tipoComprobante: tipoComprobante
-              }
-            }
+              };
+            })
           },
-          include: {
-            detalles: true,
-            pagos: true,
-            factura: true
+          factura: {
+            create: {
+              numeroComprobante: codigoVenta,
+              tipoComprobante: tipoComprobante
+            }
           }
-        });
+        },
+        include: { detalles: true, pagos: true, factura: true }
       });
+    });
 
-// --- PUNTO 6: Procesamiento asíncrono en paralelo en segundo plano (No bloqueante) ---
-    try {
-      // ✅ PASAMOS EL OBJETO COMPLETO PRIMERO
-      await this.facturasService.generarYGuardarPdf(nuevaVenta, createVentaDto); 
-    } catch (error) {
-      const mensajeError = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`⚠️ Venta ${nuevaVenta.id} guardada, pero falló la generación del PDF: ${mensajeError}`);
-    }
+    // 7. Lanzar procesos asíncronos (Descontar stock maestro y generar PDF)
+    this.ejecutarTareasPosterioresAsync(nuevaVenta, detalles, createVentaDto);
 
     return nuevaVenta;
   }
 
-  
-
-  /**
-   * Ejecuta múltiples tareas de forma concurrente y aislada sin bloquear la respuesta HTTP principal.
-   */
   private async ejecutarTareasPosterioresAsync(venta: any, detalles: any[], dto: CreateVentaDto) {
-    
-    // Tarea A: Actualización de Stock en el Microservicio de Inventario
+    // Tarea A: Actualización de Stock en el Microservicio de Inventario (SALIDA)
     try {
       for (const item of detalles) {
         const stockRes = await fetch(`${this.inventarioUrl}/movimientos-stock`, {
@@ -187,81 +206,52 @@ if (!cajaActiva) {
       this.logger.error(`🚨 Fallo al actualizar inventario: ${error.message}`);
     }
 
-    // Tarea B: Recuperar la venta con todas sus relaciones y generar el PDF físico
+    // Tarea B: Generar el PDF físico de la Factura
     try {
       this.logger.log(`[Async] Iniciando maquetación del archivo PDF para: ${venta.codigo}`);
-      
-      // Buscamos la venta usando 'venta.id' que sí existe en este contexto
-      const ventaCompleta = await this.prisma.venta.findUnique({
-        where: { id: venta.id },
-        include: {
-          detalles: true,
-          pagos: true,
-          factura: true
-        }
-      });
-
-      // Llamamos a tu servicio inyectado (corregido a minúscula 'this.facturasService')
-      if (ventaCompleta) {
-        await this.facturasService.generarYGuardarPdf(ventaCompleta, dto);
-      }
+      await this.facturasService.generarYGuardarPdf(venta, dto);
     } catch (error: any) {
       this.logger.error(`🚨 Fallo en la generación del PDF asíncrono: ${error.message}`);
     }
   }
 
-  
-
-async evaluarYCalcularDescuento(productoId: number, categoriaId: number, cantidad: number, precioUnitario: number): Promise<number> {
-  const ahora = new Date(); // 🛡️ Servidor Central impone la hora real de la transacción
-
-  // 1. Buscamos todas las promociones vigentes que apliquen a este producto o a su categoría entera
-  const promocionesVigentes = await this.prisma.promocion.findMany({
-    where: {
-      activa: true,
-      fechaInicio: { lte: ahora }, 
-      fechaFin: { gte: ahora },    
-      OR: [
-        { categoriaId: categoriaId } 
-        // Puedes agregar aquí lógica si en el futuro introduces promociones específicas por productoId
-      ]
-    }
-  });
-
-  if (promocionesVigentes.length === 0) return 0;
-
-  let mejorDescuento = 0;
-
-  // 2.MOTOR DE PRIORIDAD: Evaluamos cada regla por separado
-  for (const promo of promocionesVigentes) {
-    let descuentoActual = 0;
-
-    // Simulación de regla de Volumen 
-    // Puedes identificarlo por el nombre o 
-    if (promo.nombre.toUpperCase().includes('VOLUMEN') || promo.nombre.toUpperCase().includes('3X2')) {
-      if (cantidad >= 3) {
-        // En un 3x2, se descuenta el equivalente a un producto por cada 3 unidades
-        const unidadesRegaladas = Math.floor(cantidad / 3);
-        descuentoActual = unidadesRegaladas * precioUnitario;
+  // ... (El método evaluarYCalcularDescuento, findAll y findOne se mantienen exactamente iguales)
+  async evaluarYCalcularDescuento(productoId: number, categoriaId: number, cantidad: number, precioUnitario: number): Promise<number> {
+    const ahora = new Date(); 
+    const promocionesVigentes = await this.prisma.promocion.findMany({
+      where: {
+        activa: true,
+        fechaInicio: { lte: ahora }, 
+        fechaFin: { gte: ahora },    
+        OR: [
+          { categoriaId: categoriaId } 
+        ]
       }
-    } else {
-      // Regla estándar: Descuento regular de Categoría (Porcentaje o Monto Fijo)
-      if (promo.tipoDescuento === 'PORCENTAJE') {
-        descuentoActual = (precioUnitario * cantidad) * (Number(promo.valorDescuento) / 100);
-      } else if (promo.tipoDescuento === 'MONTO_FIJO') {
-        descuentoActual = Number(promo.valorDescuento) * cantidad;
+    });
+
+    if (promocionesVigentes.length === 0) return 0;
+    let mejorDescuento = 0;
+
+    for (const promo of promocionesVigentes) {
+      let descuentoActual = 0;
+      if (promo.nombre.toUpperCase().includes('VOLUMEN') || promo.nombre.toUpperCase().includes('3X2')) {
+        if (cantidad >= 3) {
+          const unidadesRegaladas = Math.floor(cantidad / 3);
+          descuentoActual = unidadesRegaladas * precioUnitario;
+        }
+      } else {
+        if (promo.tipoDescuento === 'PORCENTAJE') {
+          descuentoActual = (precioUnitario * cantidad) * (Number(promo.valorDescuento) / 100);
+        } else if (promo.tipoDescuento === 'MONTO_FIJO') {
+          descuentoActual = Number(promo.valorDescuento) * cantidad;
+        }
+      }
+      if (descuentoActual > mejorDescuento) {
+        mejorDescuento = descuentoActual;
       }
     }
-
-    // 🎯 REGLA DE ORO: No se acumulan linealmente. 
-    // Se selecciona el descuento que otorgue el MAYOR beneficio al cliente.
-    if (descuentoActual > mejorDescuento) {
-      mejorDescuento = descuentoActual;
-    }
+    return mejorDescuento;
   }
-
-  return mejorDescuento;
-}
 
   async findAll() {
     return this.prisma.venta.findMany({
@@ -286,6 +276,15 @@ async evaluarYCalcularDescuento(productoId: number, categoriaId: number, cantida
     }
 
     const ventaAnulada = await this.prisma.$transaction(async (tx) => {
+      
+      // 💡 NUEVO: Restaurar el stock localmente devolviendo los productos
+      for (const detalle of venta.detalles) {
+        await tx.producto.update({
+          where: { id: detalle.productoId },
+          data: { cantidadActual: { increment: detalle.cantidad } }
+        });
+      }
+
       return await tx.venta.update({
         where: { id },
         data: {
@@ -296,29 +295,67 @@ async evaluarYCalcularDescuento(productoId: number, categoriaId: number, cantida
       });
     });
 
-    // Restauración asíncrona de stock al anular para no congestionar la base de datos
+    // Restauración asíncrona de stock maestro en ms_inventario (ENTRADA)
     (async () => {
-    for (const detalle of venta.detalles) {
-      try {
-        const stockRes = await fetch(`${this.inventarioUrl}/movimientos-stock`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            productoId: detalle.productoId,
-            tipo: 'ENTRADA', // <-- Regla de negocio para devolver stock
-            cantidad: detalle.cantidad,
-            motivo: `Anulación de Venta - Código: ${venta.codigo}`,
-            usuarioId: venta.usuarioId,
-            sucursalId: venta.sucursalId
-          })
-        });
-        if (!stockRes.ok) this.logger.error(`No se pudo registrar entrada de stock para producto ${detalle.productoId}`);
-      } catch (err: any) {
-        this.logger.error(`Error de red revirtiendo stock: ${err.message}`);
+      for (const detalle of venta.detalles) {
+        try {
+          const stockRes = await fetch(`${this.inventarioUrl}/movimientos-stock`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productoId: detalle.productoId,
+              tipo: 'ENTRADA', 
+              cantidad: detalle.cantidad,
+              motivo: `Anulación de Venta - Código: ${venta.codigo}`,
+              usuarioId: venta.usuarioId,
+              sucursalId: venta.sucursalId
+            })
+          });
+          if (!stockRes.ok) this.logger.error(`No se pudo registrar entrada de stock para producto ${detalle.productoId}`);
+        } catch (err: any) {
+          this.logger.error(`Error de red revirtiendo stock: ${err.message}`);
+        }
       }
-    }
-  })();
+    })();
 
     return ventaAnulada;
+  }
+
+  async sincronizarProductosDesdeInventario() {
+    try {
+      const respuesta = await fetch('http://ms-inventario-api:3007/api/v1/productos');
+      if (!respuesta.ok) throw new Error('No se pudieron obtener los productos de Inventario');
+      
+      const productosInventario = await respuesta.json();
+
+      for (const p of productosInventario) {
+        await this.prisma.producto.upsert({
+          where: { id: Number(p.id) },
+          update: {
+            nombre: p.nombre,
+            precioVenta: Number(p.precioVenta),
+            cantidadActual: p.cantidadActual,
+          },
+          create: {
+            id: Number(p.id),
+            nombre: p.nombre,
+            precioVenta: Number(p.precioVenta),
+            cantidadActual: p.cantidadActual,
+          },
+        });
+      }
+
+      return { 
+        success: true, 
+        message: `Sincronización exitosa. ${productosInventario.length} productos actualizados.` 
+      };
+    } catch (error) {
+      console.error('Error en sincronizarProductosDesdeInventario:', error);
+      throw new BadRequestException('Error al sincronizar el catálogo de productos.');
+    }
+  }
+
+  async obtenerProductosLocales() {
+    return await this.prisma.producto.findMany({});
   }
 }

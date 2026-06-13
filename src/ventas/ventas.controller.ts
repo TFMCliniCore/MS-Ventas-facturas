@@ -11,6 +11,19 @@ import { InternalGatewayGuard } from '../common/guards/internal-gateway.guard';
 export class VentasController {
   constructor(private readonly ventasService: VentasService) {}
 
+
+  // Accionada por el botón de sincronizar del POS
+  @Post('sync-productos')
+  async syncProductos() {
+    return await this.ventasService.sincronizarProductosDesdeInventario();
+  }
+
+  // Accionada automáticamente al cargar el POS (page.tsx:39)
+  @Get('productos')
+  async getProductos() {
+    return await this.ventasService.obtenerProductosLocales();
+  }
+
   @Post()
   create(@Body() createVentaDto: CreateVentaDto, @CurrentUsuario() usuario: IUsuarioCcontext) {
     return this.ventasService.create(createVentaDto, usuario);
@@ -21,19 +34,17 @@ export class VentasController {
     return this.ventasService.findAll();
   }
 
+
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.ventasService.findOne(id);
   }
 
-  // ✅ UNIFICADO: Sin duplicados, usa tu DTO y ParseIntPipe
   @Patch(':id/anular')
-  
   anular(
-    
     @Param('id', ParseIntPipe) id: number, 
     @Body() anularVentaDto: AnularVentaDto,
-    @CurrentUsuario() usuario: IUsuarioCcontext // 👈 Capturamos el usuario para validar su Rol en el Service
+    @CurrentUsuario() usuario: IUsuarioCcontext 
   ) {
     return this.ventasService.anular(id, anularVentaDto, usuario);
   }

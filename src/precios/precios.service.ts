@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service'; // Asegúrate de que la ruta coincida con tu proyecto
+import { PrismaService } from '../prisma/prisma.service';
 import { ActualizarPrecioDto } from './dto/actualizar-precio.dto';
 
 @Injectable()
@@ -9,15 +9,19 @@ export class PreciosService {
   async calcularYRegistrarPrecio(dto: ActualizarPrecioDto) {
     const { productoId, costo, porcentajeMargenDeseado, usuarioId, permitirMargenNegativo } = dto;
 
-    // 🛑 1. VALIDACIÓN DE MARGEN (Requerimiento Backend)
-    // Si el margen es negativo y no viene con la excepción autorizada explícita, se bloquea.
+    // VALIDACIÓN EXTRA: Evitar división por cero
+    if (porcentajeMargenDeseado >= 100) {
+      throw new BadRequestException('Operación denegada: El margen deseado no puede ser igual o mayor al 100%.');
+    }
+
+    // VALIDACIÓN DE MARGEN (Requerimiento Backend)
     if (porcentajeMargenDeseado < 0 && !permitirMargenNegativo) {
       throw new BadRequestException(
         `Operación denegada: No se permite configurar un margen negativo (${porcentajeMargenDeseado}%) sin una excepción autorizada.`
       );
     }
 
-    // Aplicación de la fórmula financiera de tu costo/margen
+    // Aplicación de la fórmula financiera
     const factorMargen = 1 - (porcentajeMargenDeseado / 100);
     const precioVentaSugerido = costo / factorMargen;
 
@@ -28,29 +32,47 @@ export class PreciosService {
       );
     }
 
+    // Convertimos el resultado final a un número con 2 decimales fijos para la consistencia en BD
+    const precioFinalConsolidado = Number(precioVentaSugerido.toFixed(2));
+
     // 💾 2. AUDITORÍA / HISTORIAL DE CAMBIOS (Inserción Real en BD)
-    // Se mapea directamente contra tu modelo 'HistorialPrecio' de Prisma
+    // Nota: Aquí sí se guarda el 'precioCosto' porque tu tabla de historial sí posee este campo de auditoría.
     const nuevoRegistroPrecio = await this.prisma.historialPrecio.create({
       data: {
         productoId,
         precioCosto: costo,
-        precioVenta: Number(precioVentaSugerido.toFixed(2)),
+        precioVenta: precioFinalConsolidado,
         margen: porcentajeMargenDeseado,
         usuarioId,
-        fechaCambio: new Date(), // 🛡️ Fecha blindada del servidor
+        fechaCambio: new Date(), 
       }
     });
+    
+    // 💡 3. ACTUALIZACIÓN DEL CATÁLOGO LOCAL (Sincroniza el POS al instante)
+    // CORREGIDO: Se elimina el campo 'costo' que no pertenece al modelo Producto de ventas
+    await this.prisma.producto.update({
+      where: { id: productoId },
+      data: { 
+        precioVenta: precioFinalConsolidado
+      },
+    });
 
-    // Aquí mantienes tu lógica para notificar vía TCP/gRPC/Eventos al MS Inventario si fuera necesario
     return {
       success: true,
-      mensaje: 'Estrategia de precio calculada e historizada en BD exitosamente',
+      mensaje: 'Estrategia de precio calculada, historizada y aplicada en catálogo local exitosamente',
       data: nuevoRegistroPrecio
     };
   }
 
+  // 💡 NUEVO MÉTODO: Retorna los últimos cambios globales realizados en el negocio
+  async obtenerHistorialGlobal(limite: number) {
+    return await this.prisma.historialPrecio.findMany({
+      take: limite,
+      orderBy: { fechaCambio: 'desc' }
+    });
+  }
+
   async obtenerHistorialProducto(productoId: number) {
-    // Consulta real ordenada por el cambio más reciente
     return await this.prisma.historialPrecio.findMany({
       where: { productoId },
       orderBy: { fechaCambio: 'desc' }

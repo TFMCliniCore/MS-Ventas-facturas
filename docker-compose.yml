@@ -1,14 +1,17 @@
+version: '3.8'
+
 services:
   ms-ventas-db:
     image: postgres:16-alpine
     container_name: clinicore-ventas-db
     restart: unless-stopped
+    env_file: .env
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "5439:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -16,6 +19,10 @@ services:
       retries: 5
     volumes:
       - ms_ventas_postgres_data:/var/lib/postgresql/data
+      - ./facturas_locales:/app/facturas_locales
+    networks:
+      - default
+      - red_inventario # <-- RECOMENDABLE: Que la BD también vea la red por si acaso
 
   api-ventas:
     build:
@@ -26,6 +33,7 @@ services:
     depends_on:
       ms-ventas-db:
         condition: service_healthy
+    env_file: .env
     environment:
       PORT: ${PORT}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ms-ventas-db:5432/${POSTGRES_DB}?schema=public
@@ -35,6 +43,19 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "${PORT}:${PORT}"
+      - "5556:5555"
+    networks:            
+      - default          
+      - red_inventario   # <-- Aquí está bien, está conectado a la red de inventario
+      - red_ventas       
 
 volumes:
   ms_ventas_postgres_data:
+
+networks:
+  default:               
+  red_inventario:
+    external: true
+    name: ms_inventario_ms-inventario-net  
+  red_ventas:            
+    driver: bridge

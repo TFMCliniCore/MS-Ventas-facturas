@@ -4,6 +4,13 @@ export class IniciarTurnoDto {
   @IsNumber()
   @Min(0)
   montoApertura: number;
+
+  @IsNumber()
+  usuarioId: number; // 👈 Agregamos esta propiedad para que NestJS no la elimine
+
+  @IsOptional()
+  @IsNumber()
+  sucursalId?: number; // Por si tu servicio mapea también la sucursal desde el DTO
 }
 
 export class FinalizarTurnoDto {

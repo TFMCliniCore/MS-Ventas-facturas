@@ -2,13 +2,13 @@
 import { Module } from '@nestjs/common';
 import { PreciosController } from './precios.controller';
 import { PreciosService } from './precios.service';
-import { PrismaService } from '../prisma/prisma.service'; // 👈 1. Importa directamente el PrismaService
+import { PrismaService } from '../prisma/prisma.service'; 
 
 @Module({
   controllers: [PreciosController],
   providers: [
     PreciosService, 
-    PrismaService // 👈 2. Regístralo aquí como provider del módulo
+    PrismaService 
   ],
   exports: [PreciosService]
 })

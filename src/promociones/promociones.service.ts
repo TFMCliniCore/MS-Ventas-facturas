@@ -79,4 +79,16 @@ export class PromocionesService {
       descuentoTotal: Number(descuentoTotalAcumulado.toFixed(2))
     };
   }
+  
+  async obtenerPromocionesVigentes(): Promise<Promocion[]> {
+    const ahora = new Date();
+
+    return this.promocionesActivas.filter(promo => {
+      const fechaInicio = new Date(promo.fechaInicio);
+      const fechaFin = new Date(promo.fechaFin);
+      
+      // Valida que la fecha actual esté dentro del rango de la promoción
+      return ahora >= fechaInicio && ahora <= fechaFin;
+    });
+  }
 }

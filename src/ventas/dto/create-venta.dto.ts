@@ -57,6 +57,20 @@ export class CreateVentaDto {
   @IsNumber()
   clienteId?: number;
 
+  @IsNumber()
+  @Min(0)
+  @IsNotEmpty()
+  total: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsNotEmpty()
+  montoPagadoCon: number; 
+
+  @IsNumber()
+  @IsNotEmpty()
+  metodoPagoId: number;
+
   @IsOptional()
   @IsNumber()
   descuento?: number;

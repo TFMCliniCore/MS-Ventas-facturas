@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger, RequestMethod } from '@nestjs/common'; // 👈 Asegúrate de importar RequestMethod aquí
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -7,8 +7,18 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap-MS-Ventas');
   const app = await NestFactory.create(AppModule);
 
-  // Prefijo global de la API unificado con el ecosistema CliniCore
-  app.setGlobalPrefix('api/v1');
+  app.enableCors({
+    origin: 'http://localhost:3000', // Tu frontend de Next.js
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+  });
+
+  // 👇 🔥 UNIFICADO EN UNA SOLA LLAMADA CONTROLADA 🔥 👇
+  app.setGlobalPrefix('api/v1', {
+    exclude: [
+      { path: 'facturas/:filename', method: RequestMethod.GET }, // Excluye solo la descarga de PDFs
+    ],
+  });
 
   // Filtro de excepciones global para estandarizar respuestas de error
   app.useGlobalFilters(new HttpExceptionFilter());
@@ -24,6 +34,8 @@ async function bootstrap() {
 
   // Habilitar el apagado controlado del contenedor Docker
   app.enableShutdownHooks();
+
+  // 🗑️ SE ELIMINÓ LA SEGUNDA LLAMADA DUPLICADA QUE ROMPÍA LOS PREFIJOS
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3008;
   await app.listen(port);

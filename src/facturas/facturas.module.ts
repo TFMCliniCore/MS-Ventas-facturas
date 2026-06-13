@@ -5,6 +5,6 @@ import { FacturasService } from './facturas.service';
 @Module({
   controllers: [FacturasController],
   providers: [FacturasService],
-  exports: [FacturasService]
+  exports: [FacturasService] 
 })
 export class FacturasModule {}

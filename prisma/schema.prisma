@@ -40,11 +40,11 @@ model DetalleVenta {
   subtotal        Decimal    @db.Decimal(10, 2)
   promocionId     Int?       // Relación opcional con Promocion
   
-  // Si se borra la Venta (cabecera), se borra su detalle (Esto sí es un Cascade válido)
   venta           Venta      @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  
-  // PREVENCIÓN: No se puede borrar una promoción si ya está amarrada a un detalle histórico
   promocion       Promocion? @relation(fields: [promocionId], references: [id], onDelete: Restrict) 
+  
+  // ─── AGREGA ESTA LÍNEA PARA CERRAR LA RELACIÓN CON PRODUCTO ───
+  producto        Producto   @relation(fields: [productoId], references: [id])
 }
 
 model Pago {
@@ -80,18 +80,24 @@ model Factura {
 }
 
 model CierreCaja {
-  id              Int           @id @default(autoincrement())
-  usuarioId       Int           // Cajero en turno
-  sucursalId      Int
-  fechaApertura   DateTime      @default(now())
-  fechaCierre     DateTime?
-  montoInicial    Decimal       @db.Decimal(10, 2)
-  totalCalculado  Decimal?      @db.Decimal(10, 2) // Suma del sistema
-  totalReal       Decimal?      @db.Decimal(10, 2) // Conteo físico (Arqueo)
-  diferencia      Decimal?      @db.Decimal(10, 2)
-  observaciones   String?
-  estado          EstadoCierre  @default(ABIERTA)
-  ventas          Venta[]
+  id                Int          @id @default(autoincrement())
+  usuarioId         Int          // Cajero en turno
+  sucursalId        Int
+  fechaApertura     DateTime     @default(now())
+  fechaCierre       DateTime?
+  montoInicial      Decimal      @db.Decimal(10, 2)
+  totalCalculado    Decimal?     @db.Decimal(10, 2) // Suma del sistema
+  totalReal         Decimal?     @db.Decimal(10, 2) // Conteo físico (Arqueo)
+  
+  // 🚀 AGREGA ESTAS 3 LÍNEAS AQUÍ:
+  efectivoReal      Decimal?     @db.Decimal(10, 2) @default(0)
+  tarjetaReal       Decimal?     @db.Decimal(10, 2) @default(0)
+  transferenciaReal Decimal?     @db.Decimal(10, 2) @default(0)
+
+  diferencia        Decimal?     @db.Decimal(10, 2)
+  observaciones     String?
+  estado            EstadoCierre @default(ABIERTA)
+  ventas            Venta[]
 }
 
 model HistorialPrecio {
@@ -139,4 +145,12 @@ enum TipoDescuento {
 enum TipoComprobante {
   TICKET
   FACTURA
+}
+
+model Producto {
+  id             Int           @id
+  nombre         String
+  precioVenta    Decimal       @db.Decimal(10, 2)
+  cantidadActual Int
+  detalles       DetalleVenta[] // Tu relación existente si aplica
 }
