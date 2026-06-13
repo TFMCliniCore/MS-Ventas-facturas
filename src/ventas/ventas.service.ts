@@ -44,19 +44,22 @@ async create(createVentaDto: CreateVentaDto, usuario: IUsuarioCcontext) {
     // PASO 1.5: VALIDACIÓN DE FONDOS DISPONIBLES PARA EL VUELTO
     // =========================================================================
     // Suponiendo que metodoPagoId === 1 mapea a 'EFECTIVO'
-if (Number(metodoPagoId) === 1) {
-      const vueltoRequerido = Number(montoPagadoCon) - Number(total);
+const pagoEnEfectivo = pagos.find(p => Number(p.metodoPagoId) === 1);
 
-      if (vueltoRequerido > 0) {
-        const efectivoDisponibleEnCaja = Number(cajaAbiertaActual.montoInicial) || 0;
+if (pagoEnEfectivo) {
+  // En pagos mixtos o exactos, evaluamos la diferencia directa del flujo de efectivo totalizador
+  const vueltoRequerido = Number(montoPagadoCon) - Number(total);
 
-        if (efectivoDisponibleEnCaja < vueltoRequerido) {
-          throw new BadRequestException(
-            `Falta de efectivo en caja chica. Disponible: ${efectivoDisponibleEnCaja}, Requerido: ${vueltoRequerido}`
-          );
-        }
-      }
+  if (vueltoRequerido > 0) {
+    const efectivoDisponibleEnCaja = Number(cajaAbiertaActual.montoInicial) || 0;
+
+    if (efectivoDisponibleEnCaja < vueltoRequerido) {
+      throw new BadRequestException(
+        `Falta de efectivo en caja chica. Disponible: ${efectivoDisponibleEnCaja}, Requerido: ${vueltoRequerido}`
+      );
     }
+  }
+}
 
     // 2. Validar Stock y Existencia directamente en nuestra tabla local 'Producto'
     for (const item of detalles) {
