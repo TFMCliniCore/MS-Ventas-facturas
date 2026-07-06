@@ -324,26 +324,47 @@ if (pagoEnEfectivo) {
     return ventaAnulada;
   }
 
-  async sincronizarProductosDesdeInventario() {
+// ... (Abajo del método anular)
+
+async sincronizarProductosDesdeInventario() {
     try {
       const respuesta = await fetch('http://ms-inventario-api:3007/api/v1/productos');
       if (!respuesta.ok) throw new Error('No se pudieron obtener los productos de Inventario');
       
       const productosInventario = await respuesta.json();
 
-      for (const p of productosInventario) {
+      // Un solo ciclo limpio para procesar cada producto
+      for (const prod of productosInventario) {
+        let rutaImagen = prod.imagen || null;
+
+        if (rutaImagen) {
+          if (rutaImagen.startsWith('/api/v1/')) {
+            rutaImagen = rutaImagen.replace('/api/v1/', '/');
+          }
+          if (!rutaImagen.startsWith('/')) {
+            rutaImagen = '/' + rutaImagen;
+          }
+        }
+
+        // Extraemos limpiamente el texto de la categoría si viene como objeto desde inventario
+        const nombreCategoria = prod.categoria?.nombre || 'General';
+
         await this.prisma.producto.upsert({
-          where: { id: Number(p.id) },
+          where: { id: prod.id },
           update: {
-            nombre: p.nombre,
-            precioVenta: Number(p.precioVenta),
-            cantidadActual: p.cantidadActual,
+            nombre: prod.nombre,
+            precioVenta: prod.precioVenta,
+            cantidadActual: prod.cantidadActual,
+            imagen: rutaImagen, 
+            categoria: nombreCategoria, // 👈 Guardamos el STRING (ej: 'Farmacia')
           },
           create: {
-            id: Number(p.id),
-            nombre: p.nombre,
-            precioVenta: Number(p.precioVenta),
-            cantidadActual: p.cantidadActual,
+            id: prod.id,
+            nombre: prod.nombre,
+            precioVenta: prod.precioVenta,
+            cantidadActual: prod.cantidadActual,
+            imagen: rutaImagen, 
+            categoria: nombreCategoria, // 👈 Guardamos el STRING (ej: 'Farmacia')
           },
         });
       }
@@ -358,7 +379,22 @@ if (pagoEnEfectivo) {
     }
   }
 
-  async obtenerProductosLocales() {
-    return await this.prisma.producto.findMany({});
-  }
+  // 💡 ESTA ES LA FUNCIÓN QUE SE HABÍA PERDIDO O QUEDADO FUERA:
+async obtenerProductosLocales() {
+  const productos = await this.prisma.producto.findMany({
+    select: {
+      id: true,
+      nombre: true,
+      precioVenta: true,
+      cantidadActual: true,
+      imagen: true, 
+      categoria: true
+    }
+  });
+
+  // 👁️ REVISA LA TERMINAL DE TU BACKEND CON ESTO:
+  console.log("🔍 [Prisma Ventas DB] Primer producto:", productos[0]);
+
+  return productos;
 }
+} 

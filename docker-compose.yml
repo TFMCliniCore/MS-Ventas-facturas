@@ -43,8 +43,9 @@ services:
       - "${PORT}:${PORT}"
       - "5556:5555"
     networks:
-      - clinicore-net   
-
+      - clinicore-net
+    command: sh -c "npx prisma db push && npx prisma db seed && node dist/main"
+    
 volumes:
   ms_ventas_postgres_data:
 
