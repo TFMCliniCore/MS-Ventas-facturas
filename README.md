@@ -1,36 +1,30 @@
-# MS-Ventas-facturas | CliniCore TFM
+# CliniCore MS-Ventas-facturas
 
-Este microservicio es el componente central encargado de la orquestación del Punto de Venta (POS), el control perimetral de precios y la gestión del ciclo de vida de las facturas dentro del ecosistema de **CliniCore**. Desarrollado con **NestJS**, **TypeScript** y **Prisma ORM**, cuenta con persistencia de datos independiente en una base de datos **PostgreSQL**.
-
-## 📦 Estructura de Módulos del Sistema
-
-Para garantizar el orden y la mantenibilidad del código, las responsabilidades del microservicio se dividen en los siguientes módulos lógicos:
-
-* **Módulo de Ventas:** Orquesta el flujo principal del punto de venta (POS). Se encarga de procesar las transacciones y validar que se cumplan las reglas de negocio antes de consolidar una operación.
-* **Módulo de Facturas:** Gestiona el ciclo de vida de los comprobantes fiscales y legales generados, controlando estados como emisión, vigencia y almacenamiento de las referencias de impresión física.
-* **Módulo de Pagos:** Administra las transacciones financieras asociadas a cada orden, registrando los importes parciales o totales vinculados a una venta antes de su cierre.
-* **Módulo de Métodos de Pago:** Controla el catálogo de opciones de pago admitidas por el sistema (Efectivo, Tarjeta, etc.), regulando cómo se mapean los ingresos a nivel contable.
-* **Módulo de Precios:** Centraliza las fórmulas financieras de cálculo, simula variaciones de costos y valida los márgenes de ganancia previniendo pérdidas.
-* **Módulo de Promociones:** Motor encargado de auditar la vigencia temporal de campañas y ejecutar algoritmos de priorización para aplicar los mayores beneficios automáticos por volumen o categoría.
-* **Módulo de Cierre de Caja (Control de Turnos):** Regula los estados de operación de las cajas (Abierto/Cerrado), impidiendo la facturación y el flujo de caja fuera de los turnos autorizados.
+Componente central del ecosistema **CliniCore** encargado de la orquestación del Punto de Venta (POS), la gestión del ciclo de vida de facturas/comprobantes, el control perimetral de precios, el motor de promociones y la administración de turnos y cierres de caja. Desarrollado con **NestJS**, **TypeScript** y **Prisma ORM**, respaldado por una base de datos **PostgreSQL 16**.
 
 ---
 
-## 🚀 Funcionalidades Implementadas
-
-* **Transacciones Atómicas (POS):** Registro seguro de ventas, detalles y métodos de pago utilizando `prisma.$transaction` para garantizar la integridad referencial (Rollback automático ante fallos de stock).
-* **Validación Estricta de Payload:** Integración de `class-validator` y `class-transformer` global en el `main.ts`. Validación rigurosa de las propiedades raíz en el `CreateVentaDto` (`total`, `montoPagadoCon`, `metodoPagoId`) mapeadas limpiamente desde el Frontend.
-* **Generación de Comprobantes:** Creación automatizada de archivos PDF corporativos para Tickets y Facturas tras el cobro exitoso, guardando la referencia (`urlPdf`) en base de datos.
-* **Control de Turnos (Cierre de Caja):** Bloqueo estricto del registro de ventas y validación automatizada de efectivo disponible si la caja asignada al usuario se encuentra en estado `CERRADO` o reporta montos insuficientes para vueltos.
-* **Anulación y Desacoplamiento:** Sistema de anulación de ventas con justificación obligatoria (`motivoAnulacion`). Implementa una llamada asíncrona (`fetch`) al *MS Inventario* para la devolución del stock, evitando la congestión del hilo principal.
-* **Gestión de Precios y Auditoría:** Motor de bloqueo perimetral para evitar la asignación de precios que generen márgenes negativos. Todo cambio genera un registro inmutable en la tabla `HistorialPrecio`.
-* **Motor de Promociones:** Evaluación de vigencia de descuentos utilizando el reloj interno del servidor (`new Date()`) aplicando un algoritmo de **Prioridad de Descuentos** que selecciona el mayor beneficio no acumulable.
+## Responsabilidades
+* **Orquestación POS:** Procesamiento atómico de transacciones (`prisma.$transaction`) con reversión automática (*rollback*) de stock e inventario ante errores.
+* **Control de Turnos y Cajas:** Bloqueo perimetral de facturación y validación de efectivo en caja si el turno no está en estado `ABIERTA`.
+* **Auditoría e Historial de Precios:** Bloqueo de precios con margen negativo y registro inmutable en `HistorialPrecio`.
+* **Motor de Promociones:** Evaluación en tiempo real de vigencias (`new Date()`) aplicando algoritmos de prioridad no acumulables por producto o categoría.
+* **Comprobantes y Facturación:** Generación de PDF corporativos para Tickets/Facturas almacenados en disco local y servidos estáticamente.
+* **Integración asíncrona:** Comunicación con `MS-Inventario` (desacoplamiento de devolución de stock) y `MS-Entidades-Core`.
 
 ---
 
-## ⚙️ Variables de Entorno (`.env`)
+## Stack Tecnológico
+* **Framework:** NestJS 10 (TypeScript)
+* **ORM & DB:** Prisma ORM + PostgreSQL 16
+* **Validación:** `class-validator` + `class-transformer` (Pipe global en `main.ts`)
+* **Documentación:** Swagger / OpenAPI
+* **Contenedores:** Docker / Docker Compose
 
-Para que el sistema funcione correctamente, se debe crear un archivo `.env` en la raíz del proyecto tomando como base el archivo `.env.example`:
+---
+
+## Variables de Entorno
+Crea un archivo `.env` en la raíz del proyecto tomando como plantilla `.env.example`:
 
 ```env
 # Servidor NestJS
@@ -49,41 +43,186 @@ DATABASE_URL="postgresql://postgres:postgres@localhost:5438/ms_ventas?schema=pub
 # URLs Microservicios Dependientes
 MS_INVENTARIO_URL="http://localhost:3007/api/v1"
 MS_ENTIDADES_CORE_URL="http://localhost:3001/api/v1"
-🛠️ Instalación y Despliegue
-Sigue estos pasos para clonar, configurar e iniciar el microservicio en tu entorno local:
+```
 
-1. Instalar Dependencias
-Instala los módulos de Node necesarios para el framework:
+---
 
-Bash
-npm install
-2. Configurar la Base de Datos, Migraciones y Seed
-Asegúrate de tener la instancia de PostgreSQL activa. Luego, sincroniza el historial completo de migraciones (incluyendo el módulo de cierres de caja) y pobla el catálogo de métodos de pago fijos:
+## Estructura de Módulos del Sistema
 
-Bash
-# Generar el cliente de Prisma basado en el esquema actualizado
-npx prisma generate
+| Módulo | Descripción |
+| :--- | :--- |
+| **Ventas** | Gestiona el carrito POS, procesamiento transaccional, sincronización local de productos y anulación de ventas. |
+| **Facturas** | Genera y sirve físicamente los archivos PDF de tickets y facturas comerciales. |
+| **Cierres de Caja** | Controla el flujo de turnos (Apertura/Cierre), cálculo de saldos esperados vs. conteo físico (arqueo). |
+| **Precios** | Registra el histórico de precios, calcula márgenes de ganancia e impide ventas a pérdida. |
+| **Pagos** | Asienta el desglose transaccional de pagos vinculados a una orden (Efectivo, Tarjeta, Transferencia). |
+| **Métodos de Pago** | Catálogo administrable de métodos de pago admitidos en la plataforma. |
+| **Promociones** | Aplica descuentos automáticos temporales ajustados por categoría o producto. |
 
-# Aplicar las migraciones existentes en el historial
-npx prisma migrate dev
+---
 
-# Poblado obligatorio de la base de datos (Catálogo de Métodos de Pago, etc.)
-npx prisma db seed
-3. Levantar el Servidor
-Para iniciar el microservicio en modo desarrollo con recarga automática (hot-reload):
+## Despliegue y Ejecución
 
-Bash
-npm run start:dev
-El servidor levantará por defecto en el puerto 3008 bajo el prefijo base http://localhost:3008/api/v1.
+### Opción A: Despliegue Local
 
-🔒 Arquitectura de Datos y Asignación de Pagos
-El sistema utiliza una asignación e inserción directa y fuertemente tipada de los identificadores de pago enviados por el cliente, delegando la integridad referencial a la base de datos y retornando un 400 Bad Request en caso de inconsistencias:
+1. **Instalar dependencias:**
+   ```bash
+   npm install
+   ```
 
-TypeScript
-pagos: {
-  create: pagos.map(p => ({
-    metodoPagoId: p.metodoPagoId,
-    monto: Number(p.monto),
-    referencia: p.referencia || null
-  }))
+2. **Migraciones y Seed de Base de Datos:**
+   ```bash
+   npx prisma generate
+   npx prisma migrate dev
+   npx prisma db seed
+   ```
+
+3. **Iniciar servidor en desarrollo:**
+   ```bash
+   npm run start:dev
+   ```
+   *El microservicio estará disponible en:* `http://localhost:3008/api/v1`
+
+---
+
+### Opción B: Despliegue con Docker
+
+```bash
+docker compose up --build
+```
+* **Servicio:** `http://localhost:3008`
+* **PostgreSQL:** `localhost:5438`
+
+---
+
+## Documentación de la API (Swagger)
+
+Con el servidor en ejecución, puedes consultar la interfaz interactiva OpenAPI / Swagger en:
+
+* **UI Swagger:** `http://localhost:3008/api/v1/ventas/docs`
+* **JSON OpenAPI:** `http://localhost:3008/api/v1/ventas/docs-json`
+
+---
+
+## Catálogo de Endpoints
+
+### 1. Ventas y Operaciones POS (`/api/v1/ventas`)
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| `POST` | `/api/v1/ventas/sync-productos` | Sincroniza el catálogo local consultando a `MS-Inventario` |
+| `GET` | `/api/v1/ventas/productos` | Obtiene el catálogo local rápido de productos cargado en el POS |
+| `POST` | `/api/v1/ventas` | Registra y procesa una nueva venta (Transacción atómica) |
+| `GET` | `/api/v1/ventas` | Lista el historial general de transacciones de venta |
+| `GET` | `/api/v1/ventas/:id` | Muestra el desglose, ítems y pagos de una venta específica |
+| `PATCH`| `/api/v1/ventas/:id/anular` | Anula una venta activa y solicita devolución de stock a `MS-Inventario` |
+
+### 2. Cierres de Caja y Turnos (`/api/v1/cierres-caja`)
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| `GET` | `/api/v1/cierres-caja/activa` | Consulta el turno o caja actualmente abierto |
+| `GET` | `/api/v1/cierres-caja` | Lista historial de turnos (parámetros opcionales: `limite`, `estado`) |
+| `POST` | `/api/v1/cierres-caja` | Inicia un nuevo turno registrando el monto inicial de apertura |
+| `PATCH`| `/api/v1/cierres-caja/:id/cerrar` | Ejecuta el arqueo, calcula diferencias y cierra la caja |
+
+### 3. Gestión de Precios (`/api/v1/precios`)
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| `POST` | `/api/v1/precios` | Actualiza o establece lista de precio de un producto validando margen |
+| `GET` | `/api/v1/precios/historial` | Consulta la bitácora global de cambios de precios (`?limite=10`) |
+| `GET` | `/api/v1/precios/historial/:productoId` | Muestra las variaciones históricas de un producto |
+
+### 4. Procesamiento de Pagos y Métodos (`/api/v1/pagos`, `/api/v1/metodos-pago`)
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| `POST` | `/api/v1/pagos/venta/:ventaId` | Registra y desacopla transacciones de pago vinculadas a una venta |
+| `GET` | `/api/v1/metodos-pago` | Obtiene el catálogo de formas de pago activas |
+| `POST` | `/api/v1/metodos-pago` | Crea un nuevo método de pago aceptado |
+| `DELETE`| `/api/v1/metodos-pago/:id` | Deshabilita o elimina un método de pago existente |
+
+### 5. Facturación y PDF (`/api/v1/facturas` y static)
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| `POST` | `/api/v1/facturas/generar-manual` | Genera y fuerza el guardado en disco del comprobante en PDF |
+| `GET` | `/facturas/:filename` | Sirve/descarga el archivo PDF físicamente (*Ruta pública exenta del prefijo global*) |
+
+---
+
+## Ejemplos de Request / Response
+
+### Registrar Venta (`POST /api/v1/ventas`)
+**Body:**
+```json
+{
+  "clienteId": 12,
+  "sucursalId": 1,
+  "subtotal": 100.00,
+  "descuento": 10.00,
+  "impuestos": 19.00,
+  "total": 109.00,
+  "detalles": [
+    {
+      "productoId": 5,
+      "cantidad": 2,
+      "precioUnitario": 50.00,
+      "subtotal": 100.00,
+      "promocionId": 1
+    }
+  ],
+  "pagos": [
+    {
+      "metodoPagoId": 1,
+      "monto": 109.00,
+      "referencia": "TRANS-88492"
+    }
+  ]
 }
+```
+
+**Response (201 Created):**
+```json
+{
+  "id": 102,
+  "codigo": "FACT-200926-A9X",
+  "total": 109.00,
+  "estado": "COMPLETADA",
+  "createdAt": "2026-09-20T14:30:00.000Z",
+  "factura": {
+    "numeroComprobante": "TK-102",
+    "tipoComprobante": "TICKET",
+    "urlPdf": "/facturas/comprobante_102.pdf"
+  }
+}
+```
+
+### Procesar Cierre de Caja (`PATCH /api/v1/cierres-caja/1/cerrar`)
+**Body:**
+```json
+{
+  "totalReal": 350.00,
+  "efectivoReal": 200.00,
+  "tarjetaReal": 100.00,
+  "transferenciaReal": 50.00,
+  "observaciones": "Cuadre exitoso sin novedad"
+}
+```
+
+---
+
+## Modelo de Datos (Prisma)
+
+```
+ [ CierreCaja ] 1 ─── N [ Venta ] 1 ─── 1 [ Factura ]
+                          │     │
+                          │     └─── N [ Pago ] N ─── 1 [ MetodoPago ]
+                          │
+                          └─── N [ DetalleVenta ] N ─── 1 [ Producto ]
+                                       │
+                                       └─── N ─── 0..1 [ Promocion ]
+```
+
+* **Venta:** Encabezado con totales, estados (`PENDIENTE`, `COMPLETADA`, `ANULADA`) y motivos de anulación.
+* **DetalleVenta:** Desglose de ítems con referencias a productos sincronizados localmente y promociones aplicadas.
+* **CierreCaja:** Turno operativo con arqueos (`efectivoReal`, `tarjetaReal`, `transferenciaReal`) y cálculo automático de diferencias.
+* **HistorialPrecio:** Registro inmutable de variaciones de precios y cálculo de margen de ganancia.
+```
+eof
