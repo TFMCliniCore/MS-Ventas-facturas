@@ -148,9 +148,11 @@ enum TipoComprobante {
 }
 
 model Producto {
-  id             Int           @id
+  id             Int            @id
   nombre         String
-  precioVenta    Decimal       @db.Decimal(10, 2)
+  precioVenta    Decimal        @db.Decimal(10, 2)
   cantidadActual Int
-  detalles       DetalleVenta[] // Tu relación existente si aplica
+  imagen         String?        
+  categoria      String?       
+  detalles       DetalleVenta[]
 }

@@ -25,29 +25,31 @@ services:
       - red_inventario # <-- RECOMENDABLE: Que la BD también vea la red por si acaso
 
   api-ventas:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: clinicore-ms-ventas
-    restart: unless-stopped
-    depends_on:
-      ms-ventas-db:
-        condition: service_healthy
-    env_file: .env
-    environment:
-      PORT: ${PORT}
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ms-ventas-db:5432/${POSTGRES_DB}?schema=public
-      MS_INVENTARIO_URL: ${MS_INVENTARIO_URL}
-      MS_ENTIDADES_CORE_URL: ${MS_ENTIDADES_CORE_URL}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "${PORT}:${PORT}"
-      - "5556:5555"
-    networks:            
-      - default          
-      - red_inventario   # <-- Aquí está bien, está conectado a la red de inventario
-      - red_ventas       
+      build:
+        context: .
+        dockerfile: Dockerfile
+      container_name: clinicore-ms-ventas
+      restart: unless-stopped
+      depends_on:
+        ms-ventas-db:
+          condition: service_healthy
+      env_file: .env
+      environment:
+        PORT: ${PORT}
+        DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ms-ventas-db:5432/${POSTGRES_DB}?schema=public
+        MS_INVENTARIO_URL: ${MS_INVENTARIO_URL}
+        MS_ENTIDADES_CORE_URL: ${MS_ENTIDADES_CORE_URL}
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+      ports:
+        - "${PORT}:${PORT}"
+        - "5556:5555"
+      networks:            
+        - default          
+        - red_inventario   
+        - red_ventas       
+      # 🔄 Agrega esta línea para automatizar la creación de tablas y semillas al arrancar:
+      command: sh -c "npx prisma db push && npx prisma db seed && node dist/main"   
 
 volumes:
   ms_ventas_postgres_data:

@@ -1,17 +1,17 @@
-import { Controller, Post, Body, Res, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Res, HttpStatus, Get, Param } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger'; // 👈 Importación de Swagger
 import { Response } from 'express';
 import { FacturasService } from './facturas.service';
-import { Get, Param, NotFoundException } from '@nestjs/common';
 import { join } from 'path';
 import * as fs from 'fs';
 
-
+@ApiTags('Facturación y Comprobantes')
 @Controller('facturas')
 export class FacturasController {
   constructor(private readonly facturasService: FacturasService) {}
 
   @Post('generar-manual')
-  
+  @ApiOperation({ summary: 'Forzar la generación y guardado manual del PDF de una factura física' })
   async generarFacturaManual(@Body() payload: { venta: any; dtoVenta: any }, @Res() res: Response) {
     try {
       // Adaptado al nuevo método unificado que creamos
@@ -30,7 +30,9 @@ export class FacturasController {
       });
     }
   }
+
   @Get(':filename')
+  @ApiOperation({ summary: 'Visualizar, transmitir o descargar un comprobante de pago PDF específico' })
   descargarOVerPdf(@Param('filename') filename: string, @Res() res: Response) {
     const pathCompleto = join(process.cwd(), 'facturas_locales', filename);
     
