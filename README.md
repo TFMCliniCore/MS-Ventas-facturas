@@ -207,6 +207,67 @@ Con el servidor en ejecución, puedes consultar la interfaz interactiva OpenAPI 
 ```
 
 ---
+### Crear métodos de pago
+```
+curl -X POST http://127.0.0.1/api/v1/metodos-pago \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "EFECTIVO",
+    "requiereReferencia": false,
+    "activo": true
+  }'
+```
+### Luego
+```
+curl -X POST http://127.0.0.1/api/v1/metodos-pago \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "TARJETA",
+    "requiereReferencia": true,
+    "activo": true
+  }'
+```
+#### y:
+```
+curl -X POST http://127.0.0.1/api/v1/metodos-pago \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "MIXTO",
+    "requiereReferencia": false,
+    "activo": true
+  }'
+```
+### Después:
+```
+curl http://127.0.0.1/api/v1/metodos-pago
+```
+
+## Crear una promoción
+```
+curl -X POST http://127.0.0.1/api/v1/promociones \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Promoción Clínica 10%",
+    "tipo": "PORCENTAJE",
+    "valorDescuento": 10,
+    "fechaInicio": "2026-09-20T00:00:00.000Z",
+    "fechaFin": "2026-12-31T23:59:59.000Z"
+  }'
+```
+## Abrir una caja
+```
+curl -X POST http://127.0.0.1/api/v1/cierres-caja \
+  -H "Content-Type: application/json" \
+  -d '{
+    "montoApertura": 200000,
+    "usuarioId": 1,
+    "sucursalId": 1
+  }'
+```
+###Después:
+```
+curl http://127.0.0.1/api/v1/cierres-caja/activa
+```
 
 ## Modelo de Datos (Prisma)
 
