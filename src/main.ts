@@ -56,8 +56,7 @@ async function bootstrap() {
   SwaggerModule.setup('api/v1/ventas/docs', app, document);
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3008;
-
-  // Escuchar explícitamente en 0.0.0.0 para peticiones externas/Docker/Apache
+  //await app.listen(port);
   await app.listen(port, '0.0.0.0');
 
   logger.log(`==================================================`);
