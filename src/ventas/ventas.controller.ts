@@ -1,8 +1,8 @@
 import { Controller, Get, Post, Body, Param, Patch, ParseIntPipe } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger'; // 👈 Importación de Swagger
+import { ApiOperation, ApiTags } from '@nestjs/swagger'; 
 import { VentasService } from './ventas.service';
 import { CreateVentaDto } from './dto/create-venta.dto';
-import { AnularVentaDto } from './dto/update-venta.dto';
+import { AnularVentaDto } from './dto/anular-venta.dto';
 import { CurrentUsuario } from '../common/decorators/user-headers.decorator';
 import { IUsuarioCcontext } from '../common/interfaces/user-request.interface';
 

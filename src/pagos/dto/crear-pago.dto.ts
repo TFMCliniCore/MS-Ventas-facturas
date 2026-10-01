@@ -1,14 +1,16 @@
-import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsNumber, IsOptional, IsString, Min, IsNotEmpty } from 'class-validator';
 
 export class CrearPagoDto {
   @IsNumber()
-  metodoPagoId: number; // 1: Efectivo, 2: Tarjeta, etc.
+  @IsNotEmpty()
+  metodoPagoId: number;
 
   @IsNumber()
   @Min(0.01)
+  @IsNotEmpty()
   monto: number;
 
   @IsOptional()
   @IsString()
-  referencia?: string; // Número de voucher o transacción
+  referencia?: string;
 }
