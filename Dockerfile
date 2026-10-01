@@ -14,8 +14,11 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 
-# Esto pasa los assets del builder a /app/assets en producción
+# Pasa los assets a la imagen final de producción
 COPY --from=builder /app/assets ./assets
+
+# Garantiza la carpeta en el contenedor final de producción
+RUN mkdir -p /app/facturas_locales
 
 EXPOSE 3008
 CMD ["npm", "run", "start:prod"]

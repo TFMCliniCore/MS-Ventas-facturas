@@ -1,17 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { PrismaClient, TipoComprobante } from '@prisma/client';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service'; // 👈 Inyectamos PrismaService
 import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument = require('pdfkit');
 
 @Injectable()
-export class FacturasService {
-  private prisma = new PrismaClient();
+export class FacturasService implements OnModuleInit {
   private readonly logger = new Logger(FacturasService.name);
-  
-  private readonly carpetaAlmacenamiento = path.join(process.cwd(), 'facturas_locales');
+  private readonly carpetaAlmacenamiento = path.join(process.cwd(), process.env.FACTURAS_DIR || 'facturas_locales');
 
-  constructor() {
+  constructor(private readonly prisma: PrismaService) {} // 👈 Inyección de dependencias
+
+  // 🚀 Se ejecuta al arrancar el módulo en lugar de dentro del constructor
+  onModuleInit() {
     this.asegurarCarpetaAlmacenamiento();
   }
 
@@ -22,16 +23,10 @@ export class FacturasService {
     }
   }
 
-  // Búsqueda dinámica del logo para sortear problemas de directorios en Docker/Monorepos
   private obtenerRutaLogo(): string | null {
     const rutasPosibles = [
-      // 1. Si estás parado en la raíz del monorepo
-      path.join(process.cwd(), 'MS-Ventas', 'assets', 'clinicore-logo.png'),
-      
-      // 2. Si estás parado directamente dentro de la carpeta MS-Ventas
       path.join(process.cwd(), 'assets', 'clinicore-logo.png'),
-      
-      // 3. Ruta relativa al archivo actual usando __dirname (Suele rescatarte en producción/Docker)
+      path.join(process.cwd(), 'MS-Ventas', 'assets', 'clinicore-logo.png'),
       path.join(__dirname, '..', '..', 'assets', 'clinicore-logo.png'),
       path.join(__dirname, '..', 'assets', 'clinicore-logo.png'),
       path.join(__dirname, 'assets', 'clinicore-logo.png')
@@ -55,9 +50,7 @@ export class FacturasService {
     const listaDetalles = detalles || []; 
     const listaPagos = pagos || []; 
     
-    // VALIDACIÓN ROBUSTA: Si no viene en factura, revisa la venta o el DTO.
     const tipoStr = factura?.tipoComprobante || dtoVenta?.tipoComprobante || venta?.tipoComprobante || 'FACTURA';
-    // Si la cadena incluye 'TICKET', asume ticket, de lo contrario (ej. 'FACTURA') fuerza el A4.
     const isTicket = tipoStr.toUpperCase() === 'TICKET'; 
     const tipo = tipoStr.toUpperCase();
 
@@ -77,27 +70,15 @@ export class FacturasService {
         const writeStream = fs.createWriteStream(rutaCompleta);
         doc.pipe(writeStream);
 
-        // --- PALETA ORIGINAL RESTAURADA ---
-        const colorPrimario = '#00529B';   // Azul Corporativo CliniCore
-        const colorSecundario = '#2E7D32'; // Verde Clínico
-        const colorTexto = '#2C3E50';      // Gris Oscuro 
-        const colorGrisClaro = '#F4F6F9';  // Fondo de tablas A4
-        const colorLineas = '#E2E8F0';     // Divisores
+        const colorPrimario = '#00529B';
+        const colorSecundario = '#2E7D32';
+        const colorTexto = '#2C3E50';
+        const colorGrisClaro = '#F4F6F9';
+        const colorLineas = '#E2E8F0';
 
-        // ==========================================
-        // OBTENCIÓN DEL LOGO
-        // ==========================================
         const rutaLogoValida = this.obtenerRutaLogo();
 
-        // ==========================================
-        // 1. ENCABEZADO Y LOGO
-        // ==========================================
         if (!isTicket) {
-          // --- DISEÑO A4 ---
-          // 1. Primero pintamos el Logo o el círculo de fallback
-          if (!isTicket) {
-          // --- DISEÑO A4 ---
-          // 1. Primero pintamos el Logo o el círculo de fallback de forma única
           if (rutaLogoValida) {
             doc.image(rutaLogoValida, 40, 28, { width: 85 });
           } else {
@@ -105,11 +86,9 @@ export class FacturasService {
             doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(28).text('+', 62, 42, { width: 30, align: 'center' });
           }
 
-          // 2. Título y subtítulo de la empresa
           doc.fillColor(colorPrimario).font('Helvetica-Bold').fontSize(22).text('CLINICORE S.A.S.', 130, 42);
           doc.fillColor(colorSecundario).font('Helvetica-Oblique').fontSize(9.5).text('Sistemas de Gestión de Salud', 130, 66);
           
-          // Recuadro del comprobante (Factura)
           doc.fillColor(colorGrisClaro).rect(380, 35, 175, 55).fill();
           doc.strokeColor(colorPrimario).lineWidth(1).rect(380, 35, 175, 55).stroke();
           
@@ -117,10 +96,7 @@ export class FacturasService {
           doc.fillColor('#E74C3C').fontSize(11).text(codigo || '', 390, 56, { width: 155, align: 'center' });
           doc.fillColor(colorTexto).font('Helvetica').fontSize(8).text(`Emisión: ${fechaVenta.toLocaleString('es-CO')}`, 390, 74, { width: 155, align: 'center' });
           doc.moveDown(2.5);
-
         } else {
-          // --- DISEÑO TICKET ---
-          // 1. Primero el Logo centrado o su respectivo fallback
           if (rutaLogoValida) {
             doc.image(rutaLogoValida, 88, 15, { width: 50 });
             doc.moveDown(4);
@@ -130,27 +106,10 @@ export class FacturasService {
             doc.moveDown(2);
           }
 
-          // 2. Título comercial abajo del logo/icono
-          doc.font('Helvetica-Bold')
-            .fontSize(12)
-            .fillColor(colorTexto)
-            .text('CLINICORE S.A.S.', { align: 'center' });
-          
+          doc.font('Helvetica-Bold').fontSize(12).fillColor(colorTexto).text('CLINICORE S.A.S.', { align: 'center' });
           doc.moveDown(0.5);
         }
 
-          doc.fillColor(colorPrimario).font('Helvetica-Bold').fontSize(12).text('CLINICORE S.A.S.', { align: 'center' });
-          doc.fillColor(colorTexto).font('Helvetica').fontSize(8).text('Sistemas de Gestión de Salud', { align: 'center' });
-          doc.text(`Sucursal ID: ${venta.sucursalId || 1} | Cajero ID: ${venta.usuarioId || 1}`, { align: 'center' });
-          doc.moveDown(0.5);
-          doc.fillColor(colorPrimario).font('Helvetica-Bold').fontSize(9).text(`${tipo}: ${codigo}`, { align: 'center' });
-          doc.fillColor(colorTexto).font('Helvetica').fontSize(8).text(`Fecha: ${fechaVenta.toLocaleString('es-CO')}`, { align: 'center' });
-          doc.moveDown(0.5);
-        }
-
-        // ==========================================
-        // 2. DATOS DEL CLIENTE
-        // ==========================================
         const separarSeccion = () => {
           if (isTicket) {
             doc.strokeColor(colorLineas).lineWidth(1).moveTo(12, doc.y).lineTo(214, doc.y).stroke();
@@ -178,13 +137,8 @@ export class FacturasService {
         separarSeccion();
         doc.moveDown(0.5);
 
-        // ==========================================
-        // 3. TABLA DE PRODUCTOS
-        // ==========================================
         if (!isTicket) {
-          // --- TABLA FORMAL A4 ---
           let yTabla = doc.y;
-          
           doc.fillColor(colorPrimario).rect(40, yTabla, 515, 22).fill();
           doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(9);
           
@@ -216,7 +170,6 @@ export class FacturasService {
 
           doc.y = yTabla + 10;
         } else {        
-          // --- TABLA TICKET ---
           let yTabla = doc.y;
           doc.fillColor(colorGrisClaro).rect(12, yTabla, 202, 14).fill();
           doc.fillColor(colorPrimario).font('Helvetica-Bold').fontSize(7.5);
@@ -245,9 +198,6 @@ export class FacturasService {
           doc.y = yTabla + 5;
         }
 
-        // ==========================================
-        // 4. SECCIÓN DE TOTALES Y PAGOS
-        // ==========================================
         if (!isTicket) {
           const yTotalesBase = doc.y;
           
@@ -312,9 +262,6 @@ export class FacturasService {
           doc.moveDown(1.5);
         }
 
-        // ==========================================
-        // 5. PIE DE PÁGINA
-        // ==========================================
         doc.strokeColor(colorLineas).lineWidth(0.5).moveTo(isTicket ? 12 : 40, doc.y).lineTo(isTicket ? 214 : 555, doc.y).stroke();
         doc.moveDown(0.5);
         

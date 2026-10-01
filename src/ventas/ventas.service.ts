@@ -1,21 +1,26 @@
-import { Injectable, BadRequestException, NotFoundException, InternalServerErrorException, Logger, ForbiddenException } from '@nestjs/common';
-import { PrismaClient, TipoComprobante } from '@prisma/client';
+import { Injectable, BadRequestException, NotFoundException, Logger, ForbiddenException } from '@nestjs/common';
+import { TipoComprobante } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service'; // 👈 Inyectamos PrismaService
 import { CreateVentaDto } from './dto/create-venta.dto';
-import { AnularVentaDto } from './dto/update-venta.dto';
+import { AnularVentaDto } from './dto/anular-venta.dto';
 import { IUsuarioCcontext } from '../common/interfaces/user-request.interface';
 import { FacturasService } from '../facturas/facturas.service'; 
 
 @Injectable()
 export class VentasService {
-  private prisma = new PrismaClient();
   private readonly logger = new Logger(VentasService.name);
-  private readonly inventarioUrl = process.env.MS_INVENTARIO_URL || 'http://host.docker.internal:3007/api/v1';
+  
+  // 🌐 Usamos la variable de entorno con fallback al nombre de servicio en red Docker
+  private get inventarioUrl(): string {
+    return process.env.MS_INVENTARIO_URL || 'http://ms-inventario-api:3007/api/v1';
+  }
 
   constructor(
+    private readonly prisma: PrismaService, // 👈 Inyección de dependencias
     private readonly facturasService: FacturasService, 
   ) {}
 
-async create(createVentaDto: CreateVentaDto, usuario: IUsuarioCcontext) {
+  async create(createVentaDto: CreateVentaDto, usuario: IUsuarioCcontext) {
     const { 
       detalles, 
       pagos, 
@@ -24,12 +29,10 @@ async create(createVentaDto: CreateVentaDto, usuario: IUsuarioCcontext) {
       tipoComprobante,
       total,
       montoPagadoCon,
-      metodoPagoId 
     } = createVentaDto;
     
     const usuarioIdFinal = usuario.id || 1;
 
-    // 1. Buscamos de forma proactiva la caja activa
     const cajaAbiertaActual = await this.prisma.cierreCaja.findFirst({
       where: { estado: 'ABIERTA' },
     });
@@ -40,61 +43,49 @@ async create(createVentaDto: CreateVentaDto, usuario: IUsuarioCcontext) {
       );
     }
 
-    // =========================================================================
-    // PASO 1.5: VALIDACIÓN DE FONDOS DISPONIBLES PARA EL VUELTO
-    // =========================================================================
-    // Suponiendo que metodoPagoId === 1 mapea a 'EFECTIVO'
-const pagoEnEfectivo = pagos.find(p => Number(p.metodoPagoId) === 1);
+    const pagoEnEfectivo = pagos.find(p => Number(p.metodoPagoId) === 1);
 
-if (pagoEnEfectivo) {
-  // En pagos mixtos o exactos, evaluamos la diferencia directa del flujo de efectivo totalizador
-  const vueltoRequerido = Number(montoPagadoCon) - Number(total);
+    if (pagoEnEfectivo) {
+      const vueltoRequerido = Number(montoPagadoCon) - Number(total);
 
-  if (vueltoRequerido > 0) {
-    const efectivoDisponibleEnCaja = Number(cajaAbiertaActual.montoInicial) || 0;
+      if (vueltoRequerido > 0) {
+        const efectivoDisponibleEnCaja = Number(cajaAbiertaActual.montoInicial) || 0;
 
-    if (efectivoDisponibleEnCaja < vueltoRequerido) {
-      throw new BadRequestException(
-        `Falta de efectivo en caja chica. Disponible: ${efectivoDisponibleEnCaja}, Requerido: ${vueltoRequerido}`
-      );
-    }
-  }
-}
-
-    // 2. Validar Stock y Existencia directamente en nuestra tabla local 'Producto'
-    for (const item of detalles) {
-      try {
-        const producto = await this.prisma.producto.findUnique({
-          where: { id: item.productoId }
-        });
-        
-        if (!producto) {
-          throw new NotFoundException(`Producto con ID ${item.productoId} no existe en inventario.`);
+        if (efectivoDisponibleEnCaja < vueltoRequerido) {
+          throw new BadRequestException(
+            `Falta de efectivo en caja chica. Disponible: ${efectivoDisponibleEnCaja}, Requerido: ${vueltoRequerido}`
+          );
         }
-        
-        if (producto.cantidadActual < item.cantidad) {
-          throw new BadRequestException(`Stock insuficiente para el producto: ${producto.nombre}. Disponible: ${producto.cantidadActual}`);
-        }
-      } catch (err: any) {
-        throw new BadRequestException(err.message || 'Error validando el producto localmente.');
       }
     }
 
-    // 3. Calcular Totales matemáticos con redondeo financiero
+    for (const item of detalles) {
+      const producto = await this.prisma.producto.findUnique({
+        where: { id: item.productoId }
+      });
+      
+      if (!producto) {
+        throw new NotFoundException(`Producto con ID ${item.productoId} no existe en inventario.`);
+      }
+      
+      if (producto.cantidadActual < item.cantidad) {
+        throw new BadRequestException(`Stock insuficiente para el producto: ${producto.nombre}. Disponible: ${producto.cantidadActual}`);
+      }
+    }
+
     let calculadoSubtotal = 0;
     detalles.forEach(item => {
       calculadoSubtotal += item.cantidad * Number(item.precioUnitario);
     });
     calculadoSubtotal = Math.round(calculadoSubtotal * 100) / 100;
 
-    const impuestoPorcentaje = 0.15; // IVA 15%
+    const impuestoPorcentaje = 0.15;
     const totalDescuento = Math.round(Number(descuento) * 100) / 100;
     const subtotalConDescuento = Math.max(0, calculadoSubtotal - totalDescuento);
     
     const calculadosImpuestos = Math.round((subtotalConDescuento * impuestoPorcentaje) * 100) / 100;
     const calculadoTotal = Math.round((subtotalConDescuento + calculadosImpuestos) * 100) / 100;
 
-    // 4. Validar pagos
     const totalPagado = Math.round(pagos.reduce((acc, p) => acc + Number(p.monto), 0) * 100) / 100;
 
     if (totalPagado !== calculadoTotal) {
@@ -103,7 +94,6 @@ if (pagoEnEfectivo) {
       );
     }
 
-    // 5. Generación de Códigos
     const ahora = new Date();
     const dia = String(ahora.getDate()).padStart(2, '0');
     const mes = String(ahora.getMonth() + 1).padStart(2, '0');
@@ -114,10 +104,7 @@ if (pagoEnEfectivo) {
     const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase().padStart(4, 'X');
     const codigoVenta = `${prefijo}-${fechaFormateada}-${randomStr}`;
 
-    // 6. PERSISTENCIA EN BD Y ACTUALIZACIÓN DE STOCK LOCAL MEDIANTE TRANSACCIÓN
     const nuevaVenta = await this.prisma.$transaction(async (tx) => {
-      
-      // 💡 NUEVO: Descontar el stock localmente en cascada
       for (const item of detalles) {
         await tx.producto.update({
           where: { id: item.productoId },
@@ -150,7 +137,6 @@ if (pagoEnEfectivo) {
             create: pagos.map(p => {
               const metodoId = Number(p.metodoPagoId);
               
-              // 🔥 VALIDACIÓN: Si no viene el ID o no es un número válido, frena la operación
               if (!metodoId || isNaN(metodoId)) {
                 throw new BadRequestException(
                   `El campo 'metodoPagoId' es requerido y debe ser un número válido. Recibido: ${p.metodoPagoId}`
@@ -161,7 +147,7 @@ if (pagoEnEfectivo) {
                 monto: Number(p.monto),
                 referencia: p.referencia || null,
                 metodoPago: {
-                  connect: { id: metodoId } // 👈 Ya no usamos el "|| 1" a ciegas
+                  connect: { id: metodoId }
                 }
               };
             })
@@ -177,14 +163,12 @@ if (pagoEnEfectivo) {
       });
     });
 
-    // 7. Lanzar procesos asíncronos (Descontar stock maestro y generar PDF)
     this.ejecutarTareasPosterioresAsync(nuevaVenta, detalles, createVentaDto);
 
     return nuevaVenta;
   }
 
   private async ejecutarTareasPosterioresAsync(venta: any, detalles: any[], dto: CreateVentaDto) {
-    // Tarea A: Actualización de Stock en el Microservicio de Inventario (SALIDA)
     try {
       for (const item of detalles) {
         const stockRes = await fetch(`${this.inventarioUrl}/movimientos-stock`, {
@@ -209,7 +193,6 @@ if (pagoEnEfectivo) {
       this.logger.error(`🚨 Fallo al actualizar inventario: ${error.message}`);
     }
 
-    // Tarea B: Generar el PDF físico de la Factura
     try {
       this.logger.log(`[Async] Iniciando maquetación del archivo PDF para: ${venta.codigo}`);
       await this.facturasService.generarYGuardarPdf(venta, dto);
@@ -218,7 +201,6 @@ if (pagoEnEfectivo) {
     }
   }
 
-  // ... (El método evaluarYCalcularDescuento, findAll y findOne se mantienen exactamente iguales)
   async evaluarYCalcularDescuento(productoId: number, categoriaId: number, cantidad: number, precioUnitario: number): Promise<number> {
     const ahora = new Date(); 
     const promocionesVigentes = await this.prisma.promocion.findMany({
@@ -279,8 +261,6 @@ if (pagoEnEfectivo) {
     }
 
     const ventaAnulada = await this.prisma.$transaction(async (tx) => {
-      
-      // 💡 NUEVO: Restaurar el stock localmente devolviendo los productos
       for (const detalle of venta.detalles) {
         await tx.producto.update({
           where: { id: detalle.productoId },
@@ -298,7 +278,6 @@ if (pagoEnEfectivo) {
       });
     });
 
-    // Restauración asíncrona de stock maestro en ms_inventario (ENTRADA)
     (async () => {
       for (const detalle of venta.detalles) {
         try {
@@ -324,16 +303,14 @@ if (pagoEnEfectivo) {
     return ventaAnulada;
   }
 
-// ... (Abajo del método anular)
-
-async sincronizarProductosDesdeInventario() {
+  async sincronizarProductosDesdeInventario() {
     try {
-      const respuesta = await fetch('http://ms-inventario-api:3007/api/v1/productos');
+      // 🌐 Utiliza la URL configurable de la variable de entorno
+      const respuesta = await fetch(`${this.inventarioUrl}/productos`);
       if (!respuesta.ok) throw new Error('No se pudieron obtener los productos de Inventario');
       
       const productosInventario = await respuesta.json();
 
-      // Un solo ciclo limpio para procesar cada producto
       for (const prod of productosInventario) {
         let rutaImagen = prod.imagen || null;
 
@@ -346,7 +323,6 @@ async sincronizarProductosDesdeInventario() {
           }
         }
 
-        // Extraemos limpiamente el texto de la categoría si viene como objeto desde inventario
         const nombreCategoria = prod.categoria?.nombre || 'General';
 
         await this.prisma.producto.upsert({
@@ -356,7 +332,7 @@ async sincronizarProductosDesdeInventario() {
             precioVenta: prod.precioVenta,
             cantidadActual: prod.cantidadActual,
             imagen: rutaImagen, 
-            categoria: nombreCategoria, // 👈 Guardamos el STRING (ej: 'Farmacia')
+            categoria: nombreCategoria,
           },
           create: {
             id: prod.id,
@@ -364,7 +340,7 @@ async sincronizarProductosDesdeInventario() {
             precioVenta: prod.precioVenta,
             cantidadActual: prod.cantidadActual,
             imagen: rutaImagen, 
-            categoria: nombreCategoria, // 👈 Guardamos el STRING (ej: 'Farmacia')
+            categoria: nombreCategoria,
           },
         });
       }
@@ -374,27 +350,25 @@ async sincronizarProductosDesdeInventario() {
         message: `Sincronización exitosa. ${productosInventario.length} productos actualizados.` 
       };
     } catch (error) {
-      console.error('Error en sincronizarProductosDesdeInventario:', error);
+      this.logger.error('Error en sincronizarProductosDesdeInventario:', error);
       throw new BadRequestException('Error al sincronizar el catálogo de productos.');
     }
   }
 
-  // 💡 ESTA ES LA FUNCIÓN QUE SE HABÍA PERDIDO O QUEDADO FUERA:
-async obtenerProductosLocales() {
-  const productos = await this.prisma.producto.findMany({
-    select: {
-      id: true,
-      nombre: true,
-      precioVenta: true,
-      cantidadActual: true,
-      imagen: true, 
-      categoria: true
-    }
-  });
+  async obtenerProductosLocales() {
+    const productos = await this.prisma.producto.findMany({
+      select: {
+        id: true,
+        nombre: true,
+        precioVenta: true,
+        cantidadActual: true,
+        imagen: true, 
+        categoria: true
+      }
+    });
 
-  // 👁️ REVISA LA TERMINAL DE TU BACKEND CON ESTO:
-  console.log("🔍 [Prisma Ventas DB] Primer producto:", productos[0]);
+    this.logger.log(`🔍 [Prisma Ventas DB] Primer producto: ${JSON.stringify(productos[0])}`);
 
-  return productos;
+    return productos;
+  }
 }
-} 

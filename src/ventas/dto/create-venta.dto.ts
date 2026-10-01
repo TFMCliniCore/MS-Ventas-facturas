@@ -37,7 +37,7 @@ class PagoVentaDto {
   referencia?: string;
 }
 
-// Nueva clase para manejar las preferencias de entrega (Flujo Asíncrono)
+// Clase para manejar las preferencias de entrega (Flujo Asíncrono)
 class MetodoEntregaDto {
   @IsOptional()
   @IsBoolean()
@@ -67,10 +67,6 @@ export class CreateVentaDto {
   @IsNotEmpty()
   montoPagadoCon: number; 
 
-  @IsNumber()
-  @IsNotEmpty()
-  metodoPagoId: number;
-
   @IsOptional()
   @IsNumber()
   descuento?: number;
@@ -87,7 +83,7 @@ export class CreateVentaDto {
   @Type(() => PagoVentaDto)
   pagos: PagoVentaDto[];
 
-  // --- NUEVOS CAMPOS PARA FACTURACIÓN ---
+  // --- CAMPOS PARA FACTURACIÓN ---
 
   @IsEnum(TipoComprobante)
   @IsNotEmpty()

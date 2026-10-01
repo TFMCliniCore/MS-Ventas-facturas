@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   ms-ventas-db:
     image: postgres:16-alpine
@@ -19,45 +17,29 @@ services:
       retries: 5
     volumes:
       - ms_ventas_postgres_data:/var/lib/postgresql/data
-      - ./facturas_locales:/app/facturas_locales
-    networks:
-      - default
-      - red_inventario # <-- RECOMENDABLE: Que la BD también vea la red por si acaso
 
   api-ventas:
-      build:
-        context: .
-        dockerfile: Dockerfile
-      container_name: clinicore-ms-ventas
-      restart: unless-stopped
-      depends_on:
-        ms-ventas-db:
-          condition: service_healthy
-      env_file: .env
-      environment:
-        PORT: ${PORT}
-        DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ms-ventas-db:5432/${POSTGRES_DB}?schema=public
-        MS_INVENTARIO_URL: ${MS_INVENTARIO_URL}
-        MS_ENTIDADES_CORE_URL: ${MS_ENTIDADES_CORE_URL}
-      extra_hosts:
-        - "host.docker.internal:host-gateway"
-      ports:
-        - "${PORT}:${PORT}"
-        - "5556:5555"
-      networks:            
-        - default          
-        - red_inventario   
-        - red_ventas       
-      # 🔄 Agrega esta línea para automatizar la creación de tablas y semillas al arrancar:
-      command: sh -c "npx prisma db push && npx prisma db seed && node dist/main"   
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: clinicore-ms-ventas
+    restart: unless-stopped
+    depends_on:
+      ms-ventas-db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      PORT: ${PORT}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ms-ventas-db:5432/${POSTGRES_DB}?schema=public
+      MS_INVENTARIO_URL: ${MS_INVENTARIO_URL}
+      MS_ENTIDADES_CORE_URL: ${MS_ENTIDADES_CORE_URL}
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      - ms_ventas_uploads:/app/uploads
+      - ./facturas_locales:/app/facturas_locales
+    command: sh -c "npx prisma db push && node dist/main"
 
 volumes:
   ms_ventas_postgres_data:
-
-networks:
-  default:               
-  red_inventario:
-    external: true
-    name: ms_inventario_ms-inventario-net  
-  red_ventas:            
-    driver: bridge
+  ms_ventas_uploads:
