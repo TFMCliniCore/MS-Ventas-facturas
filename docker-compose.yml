@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   ms-ventas-db:
     image: postgres:16-alpine
@@ -9,14 +11,16 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5439:5432"
+      - "${POSTGRES_PORT:-5439}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     volumes:
       - ms_ventas_postgres_data:/var/lib/postgresql/data
+    networks:
+      - ms-ventas-net
 
   api-ventas:
     build:
@@ -27,8 +31,11 @@ services:
     depends_on:
       ms-ventas-db:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file: .env
     environment:
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: ${PORT}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ms-ventas-db:5432/${POSTGRES_DB}?schema=public
       MS_INVENTARIO_URL: ${MS_INVENTARIO_URL}
@@ -38,8 +45,15 @@ services:
     volumes:
       - ms_ventas_uploads:/app/uploads
       - ./facturas_locales:/app/facturas_locales
-    command: sh -c "npx prisma db push && node dist/main"
+    command: sh -c "npx prisma generate && npx prisma db push && node dist/main"
+    networks:
+      - ms-ventas-net
 
 volumes:
   ms_ventas_postgres_data:
   ms_ventas_uploads:
+
+networks:
+  ms-ventas-net:
+    driver: bridge
+    name: ms-ventas_default
